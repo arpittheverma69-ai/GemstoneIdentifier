@@ -1,4 +1,4 @@
-import React, { ReactNode } from "react";
+import React from "react";
 import { StyleSheet, Pressable, ViewStyle, StyleProp } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -6,14 +6,16 @@ import Animated, {
   withSpring,
   WithSpringConfig,
 } from "react-native-reanimated";
+import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, Shadows } from "@/constants/theme";
 
-interface CardProps {
-  elevation?: number;
-  onPress?: () => void;
-  children?: ReactNode;
+interface FloatingActionButtonProps {
+  icon: keyof typeof Feather.glyphMap;
+  onPress: () => void;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
 }
@@ -26,42 +28,31 @@ const springConfig: WithSpringConfig = {
   energyThreshold: 0.001,
 };
 
-const getBackgroundColorForElevation = (
-  elevation: number,
-  theme: any,
-): string => {
-  switch (elevation) {
-    case 1:
-      return theme.backgroundDefault;
-    case 2:
-      return theme.backgroundSecondary;
-    case 3:
-      return theme.backgroundTertiary;
-    default:
-      return theme.backgroundRoot;
-  }
-};
-
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function Card({ elevation = 1, onPress, children, style, disabled = false }: CardProps) {
+export function FloatingActionButton({ 
+  icon, 
+  onPress, 
+  style,
+  disabled = false,
+}: FloatingActionButtonProps) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const scale = useSharedValue(1);
-
-  const cardBackgroundColor = getBackgroundColorForElevation(elevation, theme);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
   const handlePressIn = () => {
-    if (!disabled && onPress) {
-      scale.value = withSpring(0.98, springConfig);
+    if (!disabled) {
+      scale.value = withSpring(0.92, springConfig);
     }
   };
 
   const handlePressOut = () => {
-    if (!disabled && onPress) {
+    if (!disabled) {
       scale.value = withSpring(1, springConfig);
     }
   };
@@ -71,25 +62,32 @@ export function Card({ elevation = 1, onPress, children, style, disabled = false
       onPress={disabled ? undefined : onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      disabled={disabled || !onPress}
+      disabled={disabled}
       style={[
-        styles.card,
+        styles.fab,
         {
-          backgroundColor: cardBackgroundColor,
-          opacity: disabled ? 0.6 : 1,
+          backgroundColor: theme.primary,
+          bottom: tabBarHeight + Spacing.lg,
+          opacity: disabled ? 0.5 : 1,
         },
+        Shadows.lg,
         style,
         animatedStyle,
       ]}
     >
-      {children}
+      <Feather name={icon} size={24} color="#FFFFFF" />
     </AnimatedPressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.sm,
+  fab: {
+    position: "absolute",
+    right: Spacing.xl,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

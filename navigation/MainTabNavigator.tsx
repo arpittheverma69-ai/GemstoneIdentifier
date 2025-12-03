@@ -3,13 +3,18 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Feather } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Platform, StyleSheet } from "react-native";
-import HomeStackNavigator from "@/navigation/HomeStackNavigator";
-import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
+
+import IdentificationStackNavigator from "@/navigation/IdentificationStackNavigator";
+import DatabaseStackNavigator from "@/navigation/DatabaseStackNavigator";
+import BusinessStackNavigator from "@/navigation/BusinessStackNavigator";
+import CertificateStackNavigator from "@/navigation/CertificateStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 
 export type MainTabParamList = {
-  HomeTab: undefined;
-  ProfileTab: undefined;
+  IdentificationTab: undefined;
+  DatabaseTab: undefined;
+  BusinessTab: undefined;
+  CertificateTab: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -19,7 +24,7 @@ export default function MainTabNavigator() {
 
   return (
     <Tab.Navigator
-      initialRouteName="HomeTab"
+      initialRouteName="IdentificationTab"
       screenOptions={{
         tabBarActiveTintColor: theme.tabIconSelected,
         tabBarInactiveTintColor: theme.tabIconDefault,
@@ -44,22 +49,42 @@ export default function MainTabNavigator() {
       }}
     >
       <Tab.Screen
-        name="HomeTab"
-        component={HomeStackNavigator}
+        name="IdentificationTab"
+        component={IdentificationStackNavigator}
         options={{
-          title: "Home",
+          title: "Identify",
           tabBarIcon: ({ color, size }) => (
-            <Feather name="home" size={size} color={color} />
+            <Feather name="search" size={size} color={color} />
           ),
         }}
       />
       <Tab.Screen
-        name="ProfileTab"
-        component={ProfileStackNavigator}
+        name="DatabaseTab"
+        component={DatabaseStackNavigator}
         options={{
-          title: "Profile",
+          title: "Database",
           tabBarIcon: ({ color, size }) => (
-            <Feather name="user" size={size} color={color} />
+            <Feather name="book-open" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="BusinessTab"
+        component={BusinessStackNavigator}
+        options={{
+          title: "Business",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="briefcase" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="CertificateTab"
+        component={CertificateStackNavigator}
+        options={{
+          title: "Certificate",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="award" size={size} color={color} />
           ),
         }}
       />
