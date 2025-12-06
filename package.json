@@ -8,6 +8,7 @@
     "android": "npx expo start --android",
     "ios": "npx expo start --ios",
     "web": "npx expo start --web",
+    "build": "expo export:web",
     "build:web": "npx expo export --platform web",
     "build:ios": "eas build --platform ios --profile production",
     "build:android": "eas build --platform android --profile production",

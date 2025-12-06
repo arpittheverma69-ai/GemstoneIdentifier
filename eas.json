@@ -19,27 +19,11 @@
         "buildType": "apk"
       }
     },
-    "production": {
-      "ios": {
-        "bundleIdentifier": "com.gemaipro.app"
-      },
-      "android": {
-        "package": "com.gemaipro.app"
-      }
-    }
+    "production": {}
   },
   "submit": {
-    "production": {
-      "ios": {
-        "appleId": "your-email@example.com",
-        "ascAppId": "your-app-store-connect-id",
-        "appleTeamId": "your-team-id"
-      },
-      "android": {
-        "serviceAccountKeyPath": "./google-service-account.json",
-        "track": "internal"
-      }
-    }
+    "production": {}
   }
 }
+
 

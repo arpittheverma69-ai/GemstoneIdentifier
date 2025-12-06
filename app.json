@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GemAI Pro",
-    "slug": "gemaid-pro",
+    "slug": "GemX",
     "version": "1.0.0",
     "description": "Professional gemstone identification and business management app powered by AI. Identify gemstones, manage inventory, and generate certificates.",
     "orientation": "portrait",
@@ -59,7 +59,11 @@
     },
     "extra": {
       "supabaseUrl": "https://qwdshcurrksnqqrbzseu.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZHNoY3VycmtzbnFxcmJ6c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwMzU3MzYsImV4cCI6MjA4MDYxMTczNn0.78vnhdFLvUGBZ3uUuxseysmNvf0E_YDg4y8xLwOf74I"
-    }
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZHNoY3VycmtzbnFxcmJ6c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwMzU3MzYsImV4cCI6MjA4MDYxMTczNn0.78vnhdFLvUGBZ3uUuxseysmNvf0E_YDg4y8xLwOf74I",
+      "eas": {
+        "projectId": "0475a416-d77c-4053-9616-de37b557b5ab"
+      }
+    },
+    "owner": "arpitwillgetit"
   }
 }

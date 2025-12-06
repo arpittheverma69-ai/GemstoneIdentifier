@@ -66,3 +66,4 @@ else
   echo "  3. You're authenticated (use Personal Access Token or SSH)"
 fi
 
+
