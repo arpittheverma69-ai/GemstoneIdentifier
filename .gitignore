@@ -32,6 +32,18 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# EAS
+.easignore
+google-service-account.json
+*.p8
+*.p12
+
+# Build files
+*.apk
+*.aab
+*.ipa
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +53,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Local/Replit files
+.local/

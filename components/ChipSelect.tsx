@@ -3,7 +3,7 @@ import { StyleSheet, View, Pressable, ScrollView } from "react-native";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, Shadows } from "@/constants/theme";
 
 interface ChipSelectProps {
   label?: string;
@@ -54,6 +54,7 @@ export function ChipSelect({
               onPress={() => handlePress(option)}
               style={({ pressed }) => [
                 styles.chip,
+                Shadows.sm,
                 {
                   backgroundColor: isSelected 
                     ? theme.primary 

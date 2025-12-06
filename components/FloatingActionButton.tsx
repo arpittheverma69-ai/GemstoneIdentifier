@@ -64,13 +64,12 @@ export function FloatingActionButton({
       onPressOut={handlePressOut}
       disabled={disabled}
       style={[
-        styles.fab,
+        styles.container,
         {
           backgroundColor: theme.primary,
           bottom: tabBarHeight + Spacing.lg,
           opacity: disabled ? 0.5 : 1,
         },
-        Shadows.lg,
         style,
         animatedStyle,
       ]}
@@ -81,13 +80,19 @@ export function FloatingActionButton({
 }
 
 const styles = StyleSheet.create({
-  fab: {
-    position: "absolute",
-    right: Spacing.xl,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
+  container: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });

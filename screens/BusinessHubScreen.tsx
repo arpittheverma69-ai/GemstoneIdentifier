@@ -19,6 +19,8 @@ import { Button } from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, Shadows } from "@/constants/theme";
 import { GEMSTONE_DATABASE } from "@/constants/gemstoneData";
+import { useAuth } from "@/contexts/AuthContext";
+import { signOut } from "@/services/authService";
 
 interface InventoryItem {
   id: string;
@@ -75,6 +77,7 @@ const DEALERS = [
 
 export default function BusinessHubScreen() {
   const { theme } = useTheme();
+  const { user, setUser } = useAuth();
   
   const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
   const [customers] = useState<Customer[]>(INITIAL_CUSTOMERS);
@@ -370,6 +373,61 @@ export default function BusinessHubScreen() {
           </Pressable>
         </View>
 
+        <View style={styles.sectionHeader}>
+          <ThemedText type="h4">Settings</ThemedText>
+        </View>
+
+        <Card style={styles.settingsCard}>
+          {user && (
+            <View style={styles.userInfo}>
+              <View style={[styles.userAvatar, { backgroundColor: theme.primary + "20" }]}>
+                <Feather name="user" size={24} color={theme.primary} />
+              </View>
+              <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                <ThemedText type="body" style={{ fontWeight: "600" }}>
+                  {user.full_name || user.email}
+                </ThemedText>
+                <ThemedText type="caption" style={{ color: theme.textSecondary }}>
+                  {user.email}
+                </ThemedText>
+              </View>
+            </View>
+          )}
+          <View style={styles.formSpacer} />
+          <Button
+            onPress={async () => {
+              Alert.alert(
+                "Sign Out",
+                "Are you sure you want to sign out?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Sign Out",
+                    style: "destructive",
+                    onPress: async () => {
+                      const result = await signOut();
+                      if (result.success) {
+                        setUser(null);
+                      } else {
+                        Alert.alert("Error", result.error || "Failed to sign out");
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            variant="outline"
+            style={[styles.signOutButton, { borderColor: theme.danger }]}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+              <Feather name="log-out" size={18} color={theme.danger} style={{ marginRight: Spacing.sm }} />
+              <ThemedText type="body" style={{ color: theme.danger, fontWeight: "600" }}>
+                Sign Out
+              </ThemedText>
+            </View>
+          </Button>
+        </Card>
+
         <View style={styles.bottomSpacer} />
       </ScreenScrollView>
 
@@ -638,6 +696,30 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: Spacing["4xl"],
+  },
+  settingsCard: {
+    marginBottom: Spacing.md,
+  },
+  userInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: Spacing.md,
+  },
+  userAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  signOutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: theme.danger,
+  },
+  formSpacer: {
+    height: Spacing.md,
   },
   modalContainer: {
     flex: 1,

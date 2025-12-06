@@ -28,6 +28,8 @@ export interface Gemstone {
   formation: string;
   testingGuide: string[];
   marketDemand: "High" | "Medium" | "Low";
+  image?: string; // Main gemstone image URL
+  inclusionImages?: string[]; // Array of inclusion image URLs
 }
 
 export const GEMSTONE_DATABASE: Gemstone[] = [
@@ -103,7 +105,12 @@ export const GEMSTONE_DATABASE: Gemstone[] = [
       "Check for curved striae in synthetics",
       "Dichroism test: Blue sapphire shows blue and green-blue"
     ],
-    marketDemand: "High"
+    marketDemand: "High",
+    image: "https://images.unsplash.com/photo-1602751584552-8ba73c2c59b6?w=800",
+    inclusionImages: [
+      "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=400",
+      "https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=400"
+    ]
   },
   {
     id: "emerald",
@@ -132,6 +139,11 @@ export const GEMSTONE_DATABASE: Gemstone[] = [
     category: "Precious",
     priceRangeINR: { min: 4000, max: 400000 },
     priceRangeUSD: { min: 50, max: 5000 },
+    image: "https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=800",
+    inclusionImages: [
+      "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=400",
+      "https://images.unsplash.com/photo-1602751584552-8ba73c2c59b6?w=400"
+    ],
     formation: "Forms in hydrothermal veins and pegmatites where beryllium-rich fluids interact with chromium-bearing rocks.",
     testingGuide: [
       "Check RI: 1.565-1.602 with birefringence 0.005-0.009",

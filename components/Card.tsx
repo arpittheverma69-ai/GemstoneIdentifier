@@ -8,7 +8,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, Shadows } from "@/constants/theme";
 
 interface CardProps {
   elevation?: number;
@@ -16,39 +16,37 @@ interface CardProps {
   children?: ReactNode;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  variant?: "default" | "elevated" | "outlined";
 }
 
 const springConfig: WithSpringConfig = {
-  damping: 15,
-  mass: 0.3,
-  stiffness: 150,
-  overshootClamping: true,
+  damping: 20,
+  mass: 0.5,
+  stiffness: 200,
+  overshootClamping: false,
   energyThreshold: 0.001,
-};
-
-const getBackgroundColorForElevation = (
-  elevation: number,
-  theme: any,
-): string => {
-  switch (elevation) {
-    case 1:
-      return theme.backgroundDefault;
-    case 2:
-      return theme.backgroundSecondary;
-    case 3:
-      return theme.backgroundTertiary;
-    default:
-      return theme.backgroundRoot;
-  }
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function Card({ elevation = 1, onPress, children, style, disabled = false }: CardProps) {
+export function Card({ 
+  elevation = 1, 
+  onPress, 
+  children, 
+  style, 
+  disabled = false,
+  variant = "default",
+}: CardProps) {
   const { theme } = useTheme();
   const scale = useSharedValue(1);
 
-  const cardBackgroundColor = getBackgroundColorForElevation(elevation, theme);
+  const cardBackgroundColor = variant === "outlined" 
+    ? theme.backgroundDefault 
+    : elevation === 1 
+      ? theme.backgroundDefault 
+      : elevation === 2 
+        ? theme.backgroundDefault 
+        : theme.backgroundSecondary;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -66,6 +64,23 @@ export function Card({ elevation = 1, onPress, children, style, disabled = false
     }
   };
 
+  const getShadowStyle = () => {
+    if (variant === "elevated") return Shadows.lg;
+    if (elevation === 2) return Shadows.md;
+    if (elevation === 3) return Shadows.lg;
+    return Shadows.sm;
+  };
+
+  const getBorderStyle = () => {
+    if (variant === "outlined") {
+      return {
+        borderWidth: 1.5,
+        borderColor: theme.border,
+      };
+    }
+    return {};
+  };
+
   return (
     <AnimatedPressable
       onPress={disabled ? undefined : onPress}
@@ -78,6 +93,8 @@ export function Card({ elevation = 1, onPress, children, style, disabled = false
           backgroundColor: cardBackgroundColor,
           opacity: disabled ? 0.6 : 1,
         },
+        getShadowStyle(),
+        getBorderStyle(),
         style,
         animatedStyle,
       ]}
@@ -90,6 +107,6 @@ export function Card({ elevation = 1, onPress, children, style, disabled = false
 const styles = StyleSheet.create({
   card: {
     padding: Spacing.lg,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.lg,
   },
 });

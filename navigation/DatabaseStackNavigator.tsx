@@ -22,7 +22,7 @@ export default function DatabaseStackNavigator() {
         name="GemDatabase"
         component={GemDatabaseScreen}
         options={{
-          headerTitle: "Gem Database",
+          headerTitle: "Gems",
         }}
       />
     </Stack.Navigator>

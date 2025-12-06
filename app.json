@@ -3,6 +3,7 @@
     "name": "GemAI Pro",
     "slug": "gemaid-pro",
     "version": "1.0.0",
+    "description": "Professional gemstone identification and business management app powered by AI. Identify gemstones, manage inventory, and generate certificates.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gemaipro",
@@ -10,7 +11,13 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.gemaipro.app"
+      "bundleIdentifier": "com.gemaipro.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "We need access to your photos to upload gemstone images.",
+        "NSCameraUsageDescription": "We need access to your camera to take photos of gemstones.",
+        "NSPhotoLibraryAddUsageDescription": "We need permission to save gemstone images to your photo library."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +26,14 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.gemaipro.app"
+      "package": "com.gemaipro.app",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "output": "single",
@@ -42,6 +56,10 @@
     ],
     "experiments": {
       "reactCompiler": true
+    },
+    "extra": {
+      "supabaseUrl": "https://qwdshcurrksnqqrbzseu.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZHNoY3VycmtzbnFxcmJ6c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwMzU3MzYsImV4cCI6MjA4MDYxMTczNn0.78vnhdFLvUGBZ3uUuxseysmNvf0E_YDg4y8xLwOf74I"
     }
   }
 }

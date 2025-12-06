@@ -1,5 +1,6 @@
 import React, { ReactNode } from "react";
 import { StyleSheet, Pressable, ViewStyle, StyleProp } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -9,21 +10,22 @@ import Animated, {
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { BorderRadius, Spacing } from "@/constants/theme";
+import { BorderRadius, Spacing, Shadows } from "@/constants/theme";
 
 interface ButtonProps {
   onPress?: () => void;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
-  variant?: "primary" | "secondary" | "outline";
+  variant?: "primary" | "secondary" | "outline" | "ghost";
+  size?: "sm" | "md" | "lg";
 }
 
 const springConfig: WithSpringConfig = {
-  damping: 15,
-  mass: 0.3,
-  stiffness: 150,
-  overshootClamping: true,
+  damping: 20,
+  mass: 0.5,
+  stiffness: 200,
+  overshootClamping: false,
   energyThreshold: 0.001,
 };
 
@@ -35,46 +37,106 @@ export function Button({
   style,
   disabled = false,
   variant = "primary",
+  size = "md",
 }: ButtonProps) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const scale = useSharedValue(1);
+  const opacity = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
+    opacity: opacity.value,
   }));
 
   const handlePressIn = () => {
     if (!disabled) {
-      scale.value = withSpring(0.98, springConfig);
+      scale.value = withSpring(0.96, springConfig);
+      opacity.value = withSpring(0.9, springConfig);
     }
   };
 
   const handlePressOut = () => {
     if (!disabled) {
       scale.value = withSpring(1, springConfig);
+      opacity.value = withSpring(1, springConfig);
     }
   };
 
-  const getBackgroundColor = () => {
-    if (variant === "primary") return theme.primary;
-    if (variant === "secondary") return theme.backgroundSecondary;
-    return "transparent";
+  const getHeight = () => {
+    if (size === "sm") return 40;
+    if (size === "lg") return 56;
+    return Spacing.buttonHeight;
   };
 
   const getTextColor = () => {
     if (variant === "primary") return theme.buttonText;
+    if (variant === "outline") return theme.primary;
+    if (variant === "ghost") return theme.primary;
     return theme.text;
   };
 
   const getBorderStyle = () => {
     if (variant === "outline") {
       return {
-        borderWidth: 1,
+        borderWidth: 2,
         borderColor: theme.primary,
+        backgroundColor: "transparent",
+      };
+    }
+    if (variant === "ghost") {
+      return {
+        backgroundColor: "transparent",
       };
     }
     return {};
   };
+
+  const getShadowStyle = () => {
+    if (variant === "primary") return Shadows.lg;
+    if (variant === "secondary") return Shadows.md;
+    return {};
+  };
+
+  const buttonContent = (
+    <ThemedText
+      type="body"
+      style={[
+        styles.buttonText,
+        { 
+          color: getTextColor(),
+          fontWeight: variant === "primary" ? "700" : "600",
+        },
+      ]}
+    >
+      {children}
+    </ThemedText>
+  );
+
+  if (variant === "primary") {
+    return (
+      <AnimatedPressable
+        onPress={disabled ? undefined : onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={disabled}
+        style={[
+          styles.button,
+          { height: getHeight(), opacity: disabled ? 0.6 : 1 },
+          getShadowStyle(),
+          style,
+          animatedStyle,
+        ]}
+      >
+        <LinearGradient
+          colors={[theme.gradientStart, theme.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[StyleSheet.absoluteFill, { borderRadius: BorderRadius.full }]}
+        />
+        {buttonContent}
+      </AnimatedPressable>
+    );
+  }
 
   return (
     <AnimatedPressable
@@ -85,33 +147,31 @@ export function Button({
       style={[
         styles.button,
         {
-          backgroundColor: getBackgroundColor(),
+          height: getHeight(),
+          backgroundColor: variant === "secondary" ? theme.backgroundSecondary : "transparent",
           opacity: disabled ? 0.5 : 1,
         },
         getBorderStyle(),
+        variant === "secondary" ? Shadows.sm : {},
         style,
         animatedStyle,
       ]}
     >
-      <ThemedText
-        type="body"
-        style={[styles.buttonText, { color: getTextColor() }]}
-      >
-        {children}
-      </ThemedText>
+      {buttonContent}
     </AnimatedPressable>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    height: Spacing.buttonHeight,
-    borderRadius: BorderRadius.xs,
+    borderRadius: BorderRadius.full,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: Spacing.xl,
+    overflow: "hidden",
   },
   buttonText: {
+    fontSize: 16,
     fontWeight: "600",
   },
 });
