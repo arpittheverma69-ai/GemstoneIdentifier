@@ -35,6 +35,7 @@ yarn-error.*
 .env
 
 # EAS
+.eas/
 .easignore
 google-service-account.json
 *.p8
