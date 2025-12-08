@@ -16,7 +16,8 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "We need access to your photos to upload gemstone images.",
         "NSCameraUsageDescription": "We need access to your camera to take photos of gemstones.",
-        "NSPhotoLibraryAddUsageDescription": "We need permission to save gemstone images to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "We need permission to save gemstone images to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

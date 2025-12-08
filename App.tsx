@@ -11,16 +11,22 @@ import AuthNavigator from "@/navigation/AuthNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ThemedView } from "@/components/ThemedView";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import { useTheme } from "@/hooks/useTheme";
+import { ThemeProvider, useAppTheme } from "@/contexts/ThemeContext";
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const { theme } = useTheme();
+  const themeResult = useAppTheme();
+  // Safety check - ensure theme exists
+  const theme = themeResult?.theme || {
+    primary: "#8B5CF6",
+    text: "#0F172A",
+    backgroundRoot: "#F8FAFC",
+  };
 
   if (loading) {
     return (
       <ThemedView style={[styles.root, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={theme.primary} />
+        <ActivityIndicator size="large" color={theme?.primary || "#8B5CF6"} />
       </ThemedView>
     );
   }
@@ -36,16 +42,18 @@ export default function App() {
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <ThemedView style={styles.root}>
-          <GestureHandlerRootView style={styles.root}>
-            <KeyboardProvider>
-              <AuthProvider>
-                <AppContent />
-                <StatusBar style="auto" />
-              </AuthProvider>
-            </KeyboardProvider>
-          </GestureHandlerRootView>
-        </ThemedView>
+        <ThemeProvider>
+          <ThemedView style={styles.root}>
+            <GestureHandlerRootView style={styles.root}>
+              <KeyboardProvider>
+                <AuthProvider>
+                  <AppContent />
+                  <StatusBar style="auto" />
+                </AuthProvider>
+              </KeyboardProvider>
+            </GestureHandlerRootView>
+          </ThemedView>
+        </ThemeProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
   );

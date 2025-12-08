@@ -30,7 +30,16 @@ export function Input({
   onBlur,
   ...props 
 }: InputProps) {
-  const { theme, isDark } = useTheme();
+  const themeResult = useTheme();
+  const theme = themeResult?.theme || {
+    text: "#0F172A",
+    textSecondary: "#64748B",
+    primary: "#8B5CF6",
+    danger: "#EF4444",
+    border: "#E2E8F0",
+    inputBackground: "#FFFFFF",
+  };
+  const isDark = themeResult?.isDark || false;
   const [isFocused, setIsFocused] = useState(false);
   const scale = useSharedValue(1);
 

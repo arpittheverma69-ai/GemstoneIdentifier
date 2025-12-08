@@ -16,7 +16,24 @@ export function ThemedText({
   type = "body",
   ...rest
 }: ThemedTextProps) {
-  const { theme, isDark } = useTheme();
+  const themeResult = useTheme();
+  // Safety check - ensure theme exists
+  const theme = themeResult?.theme || {
+    text: "#0F172A",
+    textSecondary: "#64748B",
+    link: "#8B5CF6",
+    primary: "#8B5CF6",
+    secondary: "#F59E0B",
+    success: "#10B981",
+    warning: "#F59E0B",
+    danger: "#EF4444",
+    backgroundRoot: "#F8FAFC",
+    backgroundDefault: "#FFFFFF",
+    backgroundSecondary: "#F1F5F9",
+    border: "#E2E8F0",
+    inputBackground: "#FFFFFF",
+  };
+  const isDark = themeResult?.isDark || false;
 
   const getColor = () => {
     if (isDark && darkColor) {
@@ -28,10 +45,10 @@ export function ThemedText({
     }
 
     if (type === "link") {
-      return theme.link;
+      return theme?.link || "#8B5CF6";
     }
 
-    return theme.text;
+    return theme?.text || "#0F172A";
   };
 
   const getTypeStyle = () => {

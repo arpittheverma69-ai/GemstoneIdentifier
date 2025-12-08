@@ -28,7 +28,14 @@ export function SelectableFieldWithOther({
   onSelect,
   placeholder = "Type custom value…",
 }: SelectableFieldWithOtherProps) {
-  const { theme } = useTheme();
+  const themeResult = useTheme();
+  const theme = themeResult?.theme || {
+    text: "#0F172A",
+    textSecondary: "#64748B",
+    primary: "#8B5CF6",
+    backgroundSecondary: "#F1F5F9",
+    border: "#E2E8F0",
+  };
   const [isOpen, setIsOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
 

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { StyleSheet, View, FlatList, Pressable, RefreshControl, ActivityIndicator } from "react-native";
+import { StyleSheet, View, FlatList, Pressable, RefreshControl, ActivityIndicator, Alert } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
@@ -9,7 +10,6 @@ import { Spacing, BorderRadius } from "@/constants/theme";
 import { getIdentificationHistory, deleteIdentificationHistory, IdentificationResult } from "@/services/identificationService";
 import { useScreenInsets } from "@/hooks/useScreenInsets";
 import { ResultCard } from "@/components/ResultCard";
-import { Alert } from "react-native";
 
 export default function IdentificationHistoryScreen() {
   const { theme } = useTheme();
@@ -44,9 +44,25 @@ export default function IdentificationHistoryScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
+            // Delete from database
             const result = await deleteIdentificationHistory(id);
+            
             if (result.success) {
+              // Also remove from AsyncStorage if it exists there
+              try {
+                const storedHistory = await AsyncStorage.getItem('identificationHistory');
+                if (storedHistory) {
+                  const history = JSON.parse(storedHistory);
+                  const updatedHistory = history.filter((item: any) => item.id !== id);
+                  await AsyncStorage.setItem('identificationHistory', JSON.stringify(updatedHistory));
+                }
+              } catch (storageError) {
+                console.log('Error removing from AsyncStorage:', storageError);
+              }
+              
+              // Update local state
               setHistory(history.filter((item) => item.id !== id));
+              Alert.alert("Success", "Identification deleted successfully from database and local storage");
             } else {
               Alert.alert("Error", result.error || "Failed to delete identification");
             }
@@ -60,7 +76,12 @@ export default function IdentificationHistoryScreen() {
     const breakdown = {
       stoneName: item.stone_name,
       confidence: item.confidence,
-      shortReasoning: item.short_reasoning,
+      shortReasoning: {
+        matchRI: item.short_reasoning?.matchRI || '',
+        matchSG: item.short_reasoning?.matchSG || '',
+        matchColor: item.short_reasoning?.matchColor || '',
+        matchClarity: item.short_reasoning?.matchClarity || '',
+      },
       otherPossibleStones: item.other_possible_stones,
       gemData: item.gem_data,
       actionButtons: {

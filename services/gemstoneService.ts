@@ -1,5 +1,14 @@
 import { supabase } from "./supabaseClient";
+import * as FileSystem from 'expo-file-system/legacy';
 import { Gemstone, FieldValue } from "@/constants/gemstoneData";
+
+// Polyfills for React Native
+if (typeof global.Buffer === 'undefined') {
+  global.Buffer = require('buffer').Buffer;
+}
+if (typeof global.Blob === 'undefined') {
+  global.Blob = require('blob-polyfill').Blob;
+}
 
 export interface CustomGemstone {
   id?: string;
@@ -148,16 +157,28 @@ export async function uploadGemstoneImage(
   }
 
   try {
-    const response = await fetch(localUri);
-    const blob = await response.blob();
-    const fileExt = localUri.split(".").pop() || "jpg";
+    // Extract file info from URI
+    const uriParts = localUri.split('.');
+    const fileExt = uriParts[uriParts.length - 1] || 'jpg';
     const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
     const filePath = `${folder}/${fileName}`;
 
+    // Read the file as base64 using expo-file-system
+    const base64 = await FileSystem.readAsStringAsync(localUri, {
+      encoding: 'base64',
+    });
+
+    // Convert base64 to Uint8Array for Supabase upload
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
     const { error: uploadError } = await supabase.storage
       .from("gemstone-images")
-      .upload(filePath, blob, {
-        contentType: blob.type || "image/jpeg",
+      .upload(filePath, bytes, {
+        contentType: `image/${fileExt}`,
         upsert: false,
       });
 
@@ -331,9 +352,49 @@ export async function getCustomGemstones(): Promise<Gemstone[]> {
   }
 }
 
-// Get all gemstones (public + user's custom) - for backward compatibility
+// Get public gemstones from database
+export async function getPublicGemstones(): Promise<Gemstone[]> {
+  if (!supabase) {
+    console.error("Supabase client not initialized");
+    return [];
+  }
+
+  try {
+    const { data: publicGems, error } = await supabase
+      .from("gemstones")
+      .select("*")
+      .eq("is_custom", false)
+      .order("variety", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching public gemstones:", error);
+      return [];
+    }
+
+    if (!publicGems || publicGems.length === 0) {
+      return [];
+    }
+
+    // Convert database gemstones to app format
+    return publicGems.map((dbGem) => convertDBGemstoneToApp(dbGem));
+  } catch (error) {
+    console.error("Error in getPublicGemstones:", error);
+    return [];
+  }
+}
+
+// Get all gemstones (public + user's custom)
 export async function getAllGemstones(): Promise<Gemstone[]> {
-  return getCustomGemstones();
+  try {
+    const [publicGems, customGems] = await Promise.all([
+      getPublicGemstones(),
+      getCustomGemstones(),
+    ]);
+    return [...publicGems, ...customGems];
+  } catch (error) {
+    console.error("Error in getAllGemstones:", error);
+    return [];
+  }
 }
 
 // Save custom gemstone
@@ -413,12 +474,48 @@ export async function updateCustomGemstone(
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: "User not authenticated" };
+    }
+
+    // Upload images if they're local URIs
+    const stoneImageUris = customGem.images.stoneImages || [];
+    const inclusionImageUris = customGem.images.inclusionImages || [];
+
+    const uploadedStoneImages = await uploadGemstoneImages(
+      stoneImageUris.filter((uri) => uri.startsWith("file://")),
+      "stone"
+    );
+    const uploadedInclusionImages = await uploadGemstoneImages(
+      inclusionImageUris.filter((uri) => uri.startsWith("file://")),
+      "inclusion"
+    );
+
+    // Combine uploaded URLs with existing URLs
+    const finalStoneImages = [
+      ...stoneImageUris.filter((uri) => !uri.startsWith("file://")),
+      ...uploadedStoneImages,
+    ];
+    const finalInclusionImages = [
+      ...inclusionImageUris.filter((uri) => !uri.startsWith("file://")),
+      ...uploadedInclusionImages,
+    ];
+
     const gemData = convertCustomGemstoneToDB(customGem);
+    gemData.images = {
+      stoneImages: finalStoneImages,
+      inclusionImages: finalInclusionImages,
+    };
 
     const { error } = await supabase
       .from("custom_gemstones")
       .update(gemData)
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", user.id); // Ensure user can only update their own gemstones
 
     if (error) {
       console.error("Error updating custom gemstone:", error);
@@ -441,10 +538,19 @@ export async function deleteCustomGemstone(
   }
 
   try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: "User not authenticated" };
+    }
+
     const { error } = await supabase
       .from("custom_gemstones")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", user.id); // Ensure user can only delete their own gemstones
 
     if (error) {
       console.error("Error deleting custom gemstone:", error);

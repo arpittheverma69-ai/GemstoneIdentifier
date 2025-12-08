@@ -6,8 +6,12 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Image,
+  ActivityIndicator
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as ImagePicker from 'expo-image-picker';
+import { supabase } from "@/services/supabaseClient";
 
 import { ScreenScrollView } from "@/components/ScreenScrollView";
 import { ThemedText } from "@/components/ThemedText";
@@ -30,6 +34,7 @@ interface InventoryItem {
   costPrice: number;
   sellingPrice: number;
   notes: string;
+  imageUrl?: string | null;
 }
 
 interface Customer {
@@ -53,9 +58,9 @@ interface Order {
 const GRADES = ["AAA", "AA", "A", "B", "C"];
 
 const INITIAL_INVENTORY: InventoryItem[] = [
-  { id: "1", stoneName: "Ruby", weight: 2.5, grade: "AAA", costPrice: 50000, sellingPrice: 85000, notes: "Burma origin, heated" },
-  { id: "2", stoneName: "Sapphire", weight: 3.2, grade: "AA", costPrice: 35000, sellingPrice: 55000, notes: "Sri Lanka, untreated" },
-  { id: "3", stoneName: "Emerald", weight: 1.8, grade: "A", costPrice: 28000, sellingPrice: 45000, notes: "Zambian, oiled" },
+  { id: "1", stoneName: "Ruby", weight: 2.5, grade: "AAA", costPrice: 50000, sellingPrice: 85000, notes: "Burma origin, heated", imageUrl: null },
+  { id: "2", stoneName: "Sapphire", weight: 3.2, grade: "AA", costPrice: 35000, sellingPrice: 55000, notes: "Sri Lanka, untreated", imageUrl: null },
+  { id: "3", stoneName: "Emerald", weight: 1.8, grade: "A", costPrice: 28000, sellingPrice: 45000, notes: "Zambian, oiled", imageUrl: null },
 ];
 
 const INITIAL_CUSTOMERS: Customer[] = [
@@ -86,7 +91,7 @@ export default function BusinessHubScreen() {
   const [showDealers, setShowDealers] = useState(false);
   const [expandedDealer, setExpandedDealer] = useState<string | null>(null);
   const [orderFilter, setOrderFilter] = useState<"all" | "pending" | "completed" | "cancelled">("all");
-
+  const [isUploading, setIsUploading] = useState(false);
   const [newItem, setNewItem] = useState({
     stoneName: "",
     weight: "",
@@ -94,33 +99,131 @@ export default function BusinessHubScreen() {
     costPrice: "",
     sellingPrice: "",
     notes: "",
+    imageUri: null,
+    imageUrl: null,
   });
 
   const totalInventoryValue = inventory.reduce((sum, item) => sum + item.sellingPrice, 0);
   const pendingOrdersCount = orders.filter(o => o.status === "pending").length;
   const monthlyProfit = inventory.reduce((sum, item) => sum + (item.sellingPrice - item.costPrice), 0);
 
-  const handleAddItem = () => {
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Sorry, we need camera roll permissions to upload images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setNewItem({...newItem, imageUri: result.assets[0].uri});
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image. Please try again.');
+    }
+  };
+
+  const uploadImage = async (uri: string): Promise<string | null> => {
+    try {
+      setIsUploading(true);
+      
+      // Get the file extension from the URI
+      const fileExt = uri.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      
+      // Convert image to blob
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      
+      // Upload to Supabase Storage
+      const { data, error } = await supabase
+        .storage
+        .from('gemstone-images')
+        .upload(fileName, blob, {
+          cacheControl: '3600',
+          upsert: false
+        });
+      
+      if (error) {
+        console.error('Error uploading image:', error);
+        throw error;
+      }
+      
+      // Get public URL of the uploaded file
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('gemstone-images')
+        .getPublicUrl(fileName);
+      
+      return publicUrl;
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleAddItem = async () => {
     if (!newItem.stoneName || !newItem.weight || !newItem.costPrice) {
+      Alert.alert('Missing Information', 'Please fill in all required fields.');
       return;
     }
 
-    const cost = parseFloat(newItem.costPrice);
-    const suggestedPrice = cost * 1.6;
+    try {
+      setIsUploading(true);
+      
+      // Upload image if a new one was selected
+      let imageUrl = newItem.imageUrl;
+      if (newItem.imageUri) {
+        imageUrl = await uploadImage(newItem.imageUri);
+      }
 
-    const item: InventoryItem = {
-      id: Date.now().toString(),
-      stoneName: newItem.stoneName,
-      weight: parseFloat(newItem.weight),
-      grade: newItem.grade || "A",
-      costPrice: cost,
-      sellingPrice: newItem.sellingPrice ? parseFloat(newItem.sellingPrice) : suggestedPrice,
-      notes: newItem.notes,
-    };
+      const cost = parseFloat(newItem.costPrice);
+      const suggestedPrice = cost * 1.6;
 
-    setInventory([...inventory, item]);
-    setNewItem({ stoneName: "", weight: "", grade: "", costPrice: "", sellingPrice: "", notes: "" });
-    setShowAddInventory(false);
+      const item: InventoryItem = {
+        id: Date.now().toString(),
+        stoneName: newItem.stoneName,
+        weight: parseFloat(newItem.weight),
+        grade: newItem.grade || "A",
+        costPrice: cost,
+        sellingPrice: newItem.sellingPrice ? parseFloat(newItem.sellingPrice) : suggestedPrice,
+        notes: newItem.notes,
+        imageUrl: imageUrl || null,
+      };
+
+      // Here you would typically save to your database
+      // For now, we'll just update the local state
+      setInventory([...inventory, item]);
+      
+      // Reset form
+      setNewItem({ 
+        stoneName: "", 
+        weight: "", 
+        grade: "", 
+        costPrice: "", 
+        sellingPrice: "", 
+        notes: "",
+        imageUri: null,
+        imageUrl: null,
+      });
+      
+      setShowAddInventory(false);
+    } catch (error) {
+      console.error('Error adding item:', error);
+      Alert.alert('Error', 'Failed to add item. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleDeleteItem = (id: string) => {
@@ -142,8 +245,219 @@ export default function BusinessHubScreen() {
     orderFilter === "all" || order.status === orderFilter
   );
 
+  const styles = StyleSheet.create({
+    statsRow: {
+      flexDirection: "row",
+      gap: Spacing.sm,
+      marginBottom: Spacing.xl,
+    },
+    statCard: {
+      flex: 1,
+      alignItems: "center",
+      padding: Spacing.md,
+      gap: Spacing.xs,
+    },
+    sectionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: Spacing.md,
+      marginTop: Spacing.lg,
+    },
+    addButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.xs,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: BorderRadius.full,
+    },
+    inventoryCard: {
+      marginBottom: Spacing.sm,
+    },
+    inventoryHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    inventoryInfo: {
+      flex: 1,
+    },
+    inventoryPrices: {
+      alignItems: "flex-end",
+    },
+    notes: {
+      marginTop: Spacing.sm,
+      fontStyle: "italic",
+    },
+    inventoryActions: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      marginTop: Spacing.sm,
+      gap: Spacing.sm,
+    },
+    actionButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    filterScroll: {
+      marginBottom: Spacing.md,
+    },
+    filterChip: {
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      borderRadius: BorderRadius.full,
+      marginRight: Spacing.sm,
+    },
+    orderCard: {
+      marginBottom: Spacing.sm,
+    },
+    orderHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      marginBottom: Spacing.xs,
+    },
+    statusBadge: {
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 2,
+      borderRadius: BorderRadius.full,
+    },
+    orderTotal: {
+      marginTop: Spacing.sm,
+      fontWeight: "600",
+    },
+    customerCard: {
+      marginBottom: Spacing.sm,
+    },
+    customerInfo: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.md,
+    },
+    customerAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    toolsGrid: {
+      flexDirection: "row",
+      gap: Spacing.sm,
+    },
+    toolCard: {
+      alignItems: "center",
+      padding: Spacing.lg,
+      gap: Spacing.sm,
+    },
+    toolIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    bottomSpacer: {
+      height: Spacing["4xl"],
+    },
+    settingsCard: {
+      marginBottom: Spacing.md,
+    },
+    userInfo: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: Spacing.md,
+    },
+    userAvatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    signOutButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    formSpacer: {
+      height: Spacing.md,
+    },
+    modalContainer: {
+      flex: 1,
+    },
+    modalHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: Spacing.lg,
+      borderBottomWidth: 1,
+      borderBottomColor: "rgba(128,128,128,0.2)",
+    },
+    modalContent: {
+      flex: 1,
+      padding: Spacing.lg,
+    },
+    formRow: {
+      flexDirection: "row",
+      gap: Spacing.md,
+    },
+    modalFooter: {
+      padding: Spacing.lg,
+      borderTopWidth: 1,
+      borderTopColor: "rgba(128,128,128,0.2)",
+    },
+    dealerCard: {
+      marginBottom: Spacing.sm,
+    },
+    dealerHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    dealerTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: Spacing.sm,
+    },
+    dealerList: {
+      marginTop: Spacing.md,
+      paddingTop: Spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(128,128,128,0.1)',
+      gap: Spacing.sm,
+    },
+    dealerItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+    },
+    imageUploadButton: {
+      width: '100%',
+      height: 150,
+      borderRadius: BorderRadius.md,
+      borderWidth: 1,
+      borderStyle: 'dashed',
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+    },
+    imagePlaceholder: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: Spacing.md,
+    },
+    imagePreview: {
+      width: '100%',
+      height: '100%',
+    },
+  });
+
   return (
-    <>
+    <ThemedView style={{ flex: 1 }}>
       <ScreenScrollView>
         <View style={styles.statsRow}>
           <Card style={[styles.statCard, { backgroundColor: theme.primary + "15" }]}>
@@ -177,58 +491,58 @@ export default function BusinessHubScreen() {
           </Card>
         </View>
 
-        <View style={styles.sectionHeader}>
-          <ThemedText type="h4">Inventory</ThemedText>
-          <Pressable
-            onPress={() => setShowAddInventory(true)}
-            style={({ pressed }) => [
-              styles.addButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 }
-            ]}
-          >
-            <Feather name="plus" size={18} color="#FFFFFF" />
-            <ThemedText type="small" style={{ color: "#FFFFFF" }}>Add</ThemedText>
-          </Pressable>
-        </View>
+      <View style={styles.sectionHeader}>
+        <ThemedText type="h4">Inventory</ThemedText>
+        <Pressable
+          onPress={() => setShowAddInventory(true)}
+          style={({ pressed }) => [
+            styles.addButton,
+            { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 }
+          ]}
+        >
+          <Feather name="plus" size={18} color="#FFFFFF" />
+          <ThemedText type="small" style={{ color: "#FFFFFF" }}>Add</ThemedText>
+        </Pressable>
+      </View>
 
-        {inventory.map(item => (
-          <Card key={item.id} style={styles.inventoryCard}>
-            <View style={styles.inventoryHeader}>
-              <View style={styles.inventoryInfo}>
-                <ThemedText type="body" style={{ fontWeight: "600" }}>
-                  {item.stoneName}
-                </ThemedText>
-                <ThemedText type="caption" style={{ color: theme.textSecondary }}>
-                  {item.weight} ct | Grade: {item.grade}
-                </ThemedText>
-              </View>
-              <View style={styles.inventoryPrices}>
-                <ThemedText type="caption" style={{ color: theme.textSecondary }}>
-                  Cost: {item.costPrice.toLocaleString()}
-                </ThemedText>
-                <ThemedText type="body" style={{ color: theme.success, fontWeight: "600" }}>
-                  {item.sellingPrice.toLocaleString()}
-                </ThemedText>
-              </View>
-            </View>
-            {item.notes ? (
-              <ThemedText type="caption" style={[styles.notes, { color: theme.textSecondary }]}>
-                {item.notes}
+      {inventory.map(item => (
+        <Card key={item.id} style={styles.inventoryCard}>
+          <View style={styles.inventoryHeader}>
+            <View style={styles.inventoryInfo}>
+              <ThemedText type="body" style={{ fontWeight: "600" }}>
+                {item.stoneName}
               </ThemedText>
-            ) : null}
-            <View style={styles.inventoryActions}>
-              <Pressable
-                onPress={() => handleDeleteItem(item.id)}
-                style={({ pressed }) => [
-                  styles.actionButton,
-                  { backgroundColor: theme.danger + "20", opacity: pressed ? 0.7 : 1 }
-                ]}
-              >
-                <Feather name="trash-2" size={16} color={theme.danger} />
-              </Pressable>
+              <ThemedText type="caption" style={{ color: theme.textSecondary }}>
+                {item.weight} ct | Grade: {item.grade}
+              </ThemedText>
             </View>
-          </Card>
-        ))}
+            <View style={styles.inventoryPrices}>
+              <ThemedText type="caption" style={{ color: theme.textSecondary }}>
+                Cost: {item.costPrice.toLocaleString()}
+              </ThemedText>
+              <ThemedText type="body" style={{ color: theme.success, fontWeight: "600" }}>
+                {item.sellingPrice.toLocaleString()}
+              </ThemedText>
+            </View>
+          </View>
+          {item.notes ? (
+            <ThemedText type="caption" style={[styles.notes, { color: theme.textSecondary }]}>
+              {item.notes}
+            </ThemedText>
+          ) : null}
+          <View style={styles.inventoryActions}>
+            <Pressable
+              onPress={() => handleDeleteItem(item.id)}
+              style={({ pressed }) => [
+                styles.actionButton,
+                { backgroundColor: theme.danger + "20", opacity: pressed ? 0.7 : 1 }
+              ]}
+            >
+              <Feather name="trash-2" size={16} color={theme.danger} />
+            </Pressable>
+          </View>
+        </Card>
+      ))}
 
         <View style={styles.sectionHeader}>
           <ThemedText type="h4">Recent Orders</ThemedText>
@@ -505,6 +819,38 @@ export default function BusinessHubScreen() {
             </View>
             <View style={styles.formSpacer} />
 
+            <View style={{ marginBottom: Spacing.md }}>
+              <ThemedText type="caption" style={{ marginBottom: 4 }}>
+                Stone Image
+              </ThemedText>
+              <Pressable
+                onPress={pickImage}
+                style={({ pressed }) => [
+                  styles.imageUploadButton,
+                  { 
+                    backgroundColor: theme.inputBackground,
+                    borderColor: theme.border,
+                    opacity: pressed ? 0.7 : 1
+                  }
+                ]}
+              >
+                {newItem.imageUri ? (
+                  <Image 
+                    source={{ uri: newItem.imageUri }} 
+                    style={styles.imagePreview} 
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <Feather name="image" size={32} color={theme.textSecondary} />
+                    <ThemedText style={{ marginTop: 8, color: theme.textSecondary }}>
+                      Tap to select an image
+                    </ThemedText>
+                  </View>
+                )}
+              </Pressable>
+            </View>
+            
             <Input
               label="Notes"
               placeholder="Origin, treatment, etc."
@@ -515,8 +861,15 @@ export default function BusinessHubScreen() {
           </ScrollView>
 
           <View style={styles.modalFooter}>
-            <Button onPress={handleAddItem}>
-              Add to Inventory
+            <Button 
+              onPress={handleAddItem}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                'Add to Inventory'
+              )}
             </Button>
           </View>
         </ThemedView>
@@ -575,202 +928,6 @@ export default function BusinessHubScreen() {
           </ScrollView>
         </ThemedView>
       </Modal>
-    </>
+    </ThemedView>
   );
 }
-
-const styles = StyleSheet.create({
-  statsRow: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-    marginBottom: Spacing.xl,
-  },
-  statCard: {
-    flex: 1,
-    alignItems: "center",
-    padding: Spacing.md,
-    gap: Spacing.xs,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-    marginTop: Spacing.lg,
-  },
-  addButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-  },
-  inventoryCard: {
-    marginBottom: Spacing.sm,
-  },
-  inventoryHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  inventoryInfo: {
-    flex: 1,
-  },
-  inventoryPrices: {
-    alignItems: "flex-end",
-  },
-  notes: {
-    marginTop: Spacing.sm,
-    fontStyle: "italic",
-  },
-  inventoryActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: Spacing.sm,
-    gap: Spacing.sm,
-  },
-  actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filterScroll: {
-    marginBottom: Spacing.md,
-  },
-  filterChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    marginRight: Spacing.sm,
-  },
-  orderCard: {
-    marginBottom: Spacing.sm,
-  },
-  orderHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: Spacing.xs,
-  },
-  statusBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.full,
-  },
-  orderTotal: {
-    marginTop: Spacing.sm,
-    fontWeight: "600",
-  },
-  customerCard: {
-    marginBottom: Spacing.sm,
-  },
-  customerInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-  },
-  customerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  toolsGrid: {
-    flexDirection: "row",
-    gap: Spacing.sm,
-  },
-  toolCard: {
-    alignItems: "center",
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  toolIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  bottomSpacer: {
-    height: Spacing["4xl"],
-  },
-  settingsCard: {
-    marginBottom: Spacing.md,
-  },
-  userInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  userAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  signOutButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderColor: theme.danger,
-  },
-  formSpacer: {
-    height: Spacing.md,
-  },
-  modalContainer: {
-    flex: 1,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: Spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(128,128,128,0.2)",
-  },
-  modalContent: {
-    flex: 1,
-    padding: Spacing.lg,
-  },
-  formSpacer: {
-    height: Spacing.md,
-  },
-  formRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-  },
-  modalFooter: {
-    padding: Spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(128,128,128,0.2)",
-  },
-  dealerCard: {
-    marginBottom: Spacing.sm,
-  },
-  dealerHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  dealerTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-  dealerList: {
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(128,128,128,0.1)",
-    gap: Spacing.sm,
-  },
-  dealerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-});

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Image, TouchableOpacity, Platform, ActivityIndicator, ActionSheetIOS, Alert, Modal } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, StyleSheet, ScrollView, Image, TouchableOpacity, Platform, ActivityIndicator, ActionSheetIOS, Alert, Modal, TextInput, Pressable } from 'react-native';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +17,8 @@ import { ResultCard, ResultCardData } from '@/components/ResultCard';
 import { GEMSTONE_DATABASE } from '@/constants/gemstoneData';
 import { logGemMeasurement } from '@/services/supabaseClient';
 import { saveIdentificationHistory } from '@/services/identificationService';
+import { geminiService, IdentificationQuestion, IdentificationResult } from '@/services/geminiService';
+import * as FileSystem from 'expo-file-system/legacy';
 
 type ColorOption = 'Red' | 'Blue' | 'Green' | 'Yellow' | 'Pink' | 'Purple' | 'Brown' | 'Black' | 'Colorless' | 'Multicolor';
 type Transparency = 'Transparent' | 'Translucent' | 'Opaque';
@@ -36,6 +38,157 @@ export default function IdentificationLabScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<ResultCardData | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
+  
+  // AI States
+  const [aiQuestions, setAiQuestions] = useState<IdentificationQuestion[]>([]);
+  const [aiAnswers, setAiAnswers] = useState<Record<string, any>>({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [showAIQuestions, setShowAIQuestions] = useState(false);
+  const [imageAnalysis, setImageAnalysis] = useState<any>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [aiResult, setAiResult] = useState<IdentificationResult | null>(null);
+  
+  // Buying Guide States
+  const [showBuyingGuide, setShowBuyingGuide] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [checklist, setChecklist] = useState([
+    { id: 1, text: "Check for color consistency and saturation", checked: false },
+    { id: 2, text: "Verify clarity and inclusion patterns", checked: false },
+    { id: 3, text: "Test refractive index with refractometer", checked: false },
+    { id: 4, text: "Check specific gravity with hydrostatic weighing", checked: false },
+    { id: 5, text: "Examine cut quality and proportions", checked: false },
+    { id: 6, text: "Look for treatments and enhancements", checked: false },
+    { id: 7, text: "Verify origin and certification", checked: false },
+    { id: 8, text: "Compare market price per carat", checked: false },
+  ]);
+
+  // Pricing calculator state
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [caratWeight, setCaratWeight] = useState('');
+  const [qualityGrade, setQualityGrade] = useState('A'); // A, B, C, D grades
+  const [customPricePerCarat, setCustomPricePerCarat] = useState('');
+  const [priceAdjustment, setPriceAdjustment] = useState('0'); // percentage adjustment
+  const [calculatedPrice, setCalculatedPrice] = useState<{ inr: number; usd: number } | null>(null);
+
+  // Custom price multipliers for quality grades
+  const qualityMultipliers = {
+    'A': 1.0, // Base price
+    'B': 0.8, // 20% less
+    'C': 0.6, // 40% less
+    'D': 0.4, // 60% less
+  };
+
+  // Real gemstone-specific optical tests using actual database data
+  const getOpticalTests = useCallback((gemstone: any) => {
+    const gemstoneName = gemstone.variety.toLowerCase();
+    
+    if (gemstoneName.includes('ruby') || gemstoneName.includes('corundum')) {
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'D.R.'} - Ruby is doubly refractive`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'DICHROIC'} - Red to purple-red colors`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'VITREOUS'} - Ruby has vitreous luster`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'CRYSTALS, NEEDLES, COLOR ZONING, SILK'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'INERT'} - Ruby shows inert response`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity?.split('–')[0] || '3.99'}-${gemstone.specificGravity?.split('–')[1] || '3.99'} - Heavy liquid test`, checked: false },
+      ];
+    } else if (gemstoneName.includes('emerald')) {
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'D.R.'} - Emerald is doubly refractive`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'DICHROIC'} - Green to blue-green colors`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'VITREOUS'} - Emerald has vitreous luster`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'BLACK & BROWN MICA, RAIN LIKE INC'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'INERT'} - Emerald shows inert response`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity?.split('–')[0] || '2.67'}-${gemstone.specificGravity?.split('–')[1] || '2.80'} - Heavy liquid test`, checked: false },
+      ];
+    } else if (gemstoneName.includes('sapphire')) {
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'D.R.'} - Sapphire is doubly refractive`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'DICHROIC'} - Blue to violet-blue colors`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'VITREOUS'} - Sapphire has vitreous luster`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'CRYSTALS, NEEDLES, COLOR ZONING, SILK'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'INERT'} - Sapphire shows inert response`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity?.split('–')[0] || '3.99'}-${gemstone.specificGravity?.split('–')[1] || '3.99'} - Heavy liquid test`, checked: false },
+      ];
+    } else if (gemstoneName.includes('tourmaline')) {
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'D.R.'} - Tourmaline is doubly refractive`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'STRONG'} - Strong color variation`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'VITREOUS'} - Tourmaline has vitreous luster`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'TRICHITES, NEEDLES, GROWTH TUBES'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'INERT'} - Tourmaline shows inert response`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity?.split('–')[0] || '3.05'}-${gemstone.specificGravity?.split('–')[1] || '3.15'} - Heavy liquid test`, checked: false },
+      ];
+    } else if (gemstoneName.includes('garnet')) {
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'S.R.'} - Garnet is singly refractive`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'NONE'} - Garnet has no pleochroism`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'RESINOUS'} - Garnet has resinous luster`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'CRYSTALS, NEEDLES'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'INERT'} - Garnet shows inert response`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity?.split('–')[0] || '3.70'}-${gemstone.specificGravity?.split('–')[1] || '4.20'} - Heavy liquid test`, checked: false },
+      ];
+    } else {
+      // Generic for other gemstones - use actual data from database
+      return [
+        { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'Unknown'} - ${gemstone.variety} optical character`, checked: false },
+        { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'Unknown'} - Check with dichroscope`, checked: false },
+        { id: 11, text: `Luster: ${gemstone.luster || 'Unknown'} - ${gemstone.variety} luster type`, checked: false },
+        { id: 12, text: `Inclusions: ${gemstone.typicalInclusions?.split(', ').slice(0, 2).join(', ') || 'Characteristic inclusions'}`, checked: false },
+        { id: 13, text: `UV Test: ${gemstone.uvReaction || 'Check fluorescence under UV light'}`, checked: false },
+        { id: 14, text: `SG Test: ${gemstone.specificGravity || 'Unknown'} - Specific gravity test`, checked: false },
+      ];
+    }
+  }, []);
+
+  const [opticalTests, setOpticalTests] = useState(() => result?.gemData ? getOpticalTests(result.gemData) : []);
+
+  // Update optical tests when result changes
+  useEffect(() => {
+    if (result?.gemData) {
+      setOpticalTests(getOpticalTests(result.gemData));
+    }
+  }, [result, getOpticalTests]);
+
+  // Calculate price function
+  const calculatePrice = () => {
+    if (!caratWeight || parseFloat(caratWeight) <= 0 || !result?.gemData) {
+      Alert.alert('Error', 'Please enter a valid carat weight');
+      return;
+    }
+
+    const weight = parseFloat(caratWeight);
+    // Use default pricing since priceRange properties don't exist
+    const basePriceINR = customPricePerCarat ? 
+      parseFloat(customPricePerCarat) : 
+      10000; // Default base price
+    
+    const basePriceUSD = customPricePerCarat ? 
+      parseFloat(customPricePerCarat) / 83 : // Approximate conversion rate
+      120; // Default base price in USD
+
+    // Apply quality multiplier
+    const qualityMultiplier = qualityMultipliers[qualityGrade as keyof typeof qualityMultipliers];
+    
+    // Apply price adjustment
+    const adjustmentMultiplier = 1 + (parseFloat(priceAdjustment) || 0) / 100;
+    
+    // Calculate final price
+    const finalPriceINR = Math.round(weight * basePriceINR * qualityMultiplier * adjustmentMultiplier);
+    const finalPriceUSD = Math.round(weight * basePriceUSD * qualityMultiplier * adjustmentMultiplier);
+    
+    setCalculatedPrice({ inr: finalPriceINR, usd: finalPriceUSD });
+  };
+
+  const toggleCheck = (id: number) => {
+    // Update main checklist
+    setChecklist(prev => prev.map(item => 
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+    // Update optical tests
+    setOpticalTests(prev => prev.map(item => 
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+  };
   
   // Optical properties for quick identification modal
   const [isDR, setIsDR] = useState<boolean | null>(null); // Double Refractive
@@ -119,191 +272,215 @@ export default function IdentificationLabScreen() {
   };
 
   const handleFinalIdentify = async () => {
-    try {
     setIsLoading(true);
-      const ri = parseFloat((riValue || '').split('-')[0]);
-      const riMax = riValue.includes('-') ? parseFloat(riValue.split('-')[1]) : ri;
-      const sg = parseFloat(sgValue || '');
+    try {
+      const ri = parseFloat(riValue);
+      const sg = parseFloat(sgValue);
 
-    const scores = GEMSTONE_DATABASE.map(gem => {
-      let score = 0;
-        let matchRI = false;
-        let matchSG = false;
-        let matchColor = false;
-        let matchClarity = false;
+      // Comprehensive database matching using all parameters
+      const matches = GEMSTONE_DATABASE.map(gem => {
+        let score = 0;
+        let maxScore = 0;
+        const reasons = [];
 
-      if (selectedColors.length) {
-        const colorMatch = selectedColors.some(c => gem.colors.map(x => x.toLowerCase()).includes(c.toLowerCase()));
-          if (colorMatch) {
-            score += 30;
-            matchColor = true;
-          }
-      }
-      if (transparency) {
-        const tMatch = gem.transparency.map(x => x.toLowerCase()).includes(transparency.toLowerCase());
-          if (tMatch) {
-            score += 15;
-            matchClarity = true;
-      }
-        }
-      if (!isNaN(ri)) {
+        // RI matching (weighted heavily)
+        if (!isNaN(ri)) {
+          maxScore += 30;
           if (ri >= gem.riMin && ri <= gem.riMax) {
-            score += 25;
-            matchRI = true;
-      }
+            score += 30;
+            reasons.push(`RI ${ri} matches ${gem.riMin}-${gem.riMax}`);
+          } else {
+            const riDiff = Math.min(Math.abs(ri - gem.riMin), Math.abs(ri - gem.riMax));
+            if (riDiff <= 0.05) {
+              score += 15;
+              reasons.push(`RI ${ri} close to ${gem.riMin}-${gem.riMax}`);
+            }
+          }
+        } else {
+          maxScore += 10; // Less penalty if RI not provided
         }
-      if (!isNaN(sg)) {
+
+        // SG matching (weighted heavily)
+        if (!isNaN(sg)) {
+          maxScore += 25;
           if (sg >= gem.sgMin && sg <= gem.sgMax) {
-            score += 20;
-            matchSG = true;
+            score += 25;
+            reasons.push(`SG ${sg} matches ${gem.sgMin}-${gem.sgMax}`);
+          } else {
+            const sgDiff = Math.min(Math.abs(sg - gem.sgMin), Math.abs(sg - gem.sgMax));
+            if (sgDiff <= 0.1) {
+              score += 12;
+              reasons.push(`SG ${sg} close to ${gem.sgMin}-${gem.sgMax}`);
+            }
           }
-      }
-      if (stoneGuess !== 'Not sure' && stoneGuess.toLowerCase() === gem.variety.toLowerCase()) score += 10;
-        
-        // Add optical properties scoring
-        if (isDR !== null) {
-          const isGemDR = gem.opticCharacter.toLowerCase().includes('dr') || gem.opticCharacter.toLowerCase().includes('double');
-          if (isDR === isGemDR) {
-            score += 15;
-          }
+        } else {
+          maxScore += 8;
         }
-        if (hasPleochroism !== null) {
-          const gemHasPleochroism = !gem.pleochroism.toLowerCase().includes('none') && !gem.pleochroism.toLowerCase().includes('not');
-          if (hasPleochroism === gemHasPleochroism) {
+
+        // Color matching (very important)
+        if (selectedColors.length > 0) {
+          maxScore += 20;
+          const gemColors = gem.colors.map(c => c.toLowerCase());
+          const matchingColors = selectedColors.filter(color => 
+            gemColors.some(gemColor => 
+              gemColor.includes(color.toLowerCase()) || 
+              color.toLowerCase().includes(gemColor)
+            )
+          );
+          if (matchingColors.length > 0) {
+            const colorScore = (matchingColors.length / selectedColors.length) * 20;
+            score += colorScore;
+            reasons.push(`Colors ${matchingColors.join(', ')} match`);
+          }
+        } else {
+          maxScore += 5;
+        }
+
+        // Transparency matching
+        if (transparency) {
+          maxScore += 10;
+          if (gem.transparency.includes(transparency)) {
             score += 10;
+            reasons.push(`Transparency ${transparency} matches`);
           }
+        } else {
+          maxScore += 3;
         }
-        if (hasUVResponse !== null) {
-          const gemHasUV = !gem.uvResponse.toLowerCase().includes('inert') && !gem.uvResponse.toLowerCase().includes('none');
-          if (hasUVResponse === gemHasUV) {
+
+        // Luster matching (from advanced parameters)
+        if (luster.length > 0) {
+          maxScore += 10;
+          if (luster.includes(gem.luster)) {
+            score += 10;
+            reasons.push(`Luster ${gem.luster} matches`);
+          }
+        } else {
+          maxScore += 3;
+        }
+
+        // Crystal System matching
+        if (crystalSystem.length > 0) {
+          maxScore += 8;
+          if (crystalSystem.includes(gem.crystalSystem)) {
             score += 8;
+            reasons.push(`Crystal System ${gem.crystalSystem} matches`);
           }
+        } else {
+          maxScore += 2;
         }
-        if (hasInclusions !== null) {
-          const gemHasInclusions = gem.inclusions.length > 0 && !gem.inclusions.some(inc => inc.toLowerCase().includes('none'));
-          if (hasInclusions === gemHasInclusions) {
+
+        // Pleochroism matching
+        if (pleochroism) {
+          maxScore += 7;
+          if (pleochroism === 'Present' && gem.pleochroism !== 'NONE') {
             score += 7;
+            reasons.push(`Pleochroism ${gem.pleochroism} matches`);
+          } else if (pleochroism === 'Not visible' && gem.pleochroism === 'NONE') {
+            score += 7;
+            reasons.push(`No pleochroism matches`);
           }
-        }
-        
-        return { gem, score, matchRI, matchSG, matchColor, matchClarity };
-    }).sort((a, b) => b.score - a.score);
-
-    const primary = scores[0];
-      const secondary = scores.slice(1, 4).filter(s => s.score > 0);
-      
-      // Always show a result, even if score is 0 (use first gem as default)
-      if (!primary || primary.score === 0) {
-        // Use the first gem from database or user's guess if available
-        const defaultGem = stoneGuess !== 'Not sure' 
-          ? GEMSTONE_DATABASE.find(g => g.variety.toLowerCase() === stoneGuess.toLowerCase()) || GEMSTONE_DATABASE[0]
-          : GEMSTONE_DATABASE[0];
-        
-        if (!defaultGem) {
-          Alert.alert('Error', 'Unable to identify gemstone. Please provide more details.');
-          setIsLoading(false);
-          return;
+        } else {
+          maxScore += 2;
         }
 
-    const breakdown = {
-          stoneName: defaultGem.variety,
-          confidence: '10%',
-          shortReasoning: {
-            matchRI: !isNaN(ri) ? `RI ${riValue} provided but needs verification` : '',
-            matchSG: !isNaN(sg) ? `SG ${sgValue} provided but needs verification` : '',
-            matchColor: selectedColors.length ? `${selectedColors.join(', ')} color noted` : '',
-            matchClarity: transparency ? `${transparency} transparency noted` : '',
-          },
-          otherPossibleStones: [],
-          gemData: {
-            variety: defaultGem.variety,
-            chemicalComposition: defaultGem.chemicalComposition,
-            crystalSystem: defaultGem.crystalSystem,
-            colorRange: defaultGem.colors.join(', '),
-            causeOfColor: defaultGem.causeOfColor,
-            transparency: defaultGem.transparency.join(', '),
-            luster: defaultGem.luster,
-            hardness: defaultGem.hardness.toString(),
-            specificGravity: `${defaultGem.sgMin}–${defaultGem.sgMax}`,
-            refractiveIndex: `${defaultGem.riMin}–${defaultGem.riMax}`,
-            cleavage: defaultGem.cleavage,
-            fracture: defaultGem.fracture,
-            opticCharacter: defaultGem.opticCharacter,
-            pleochroism: defaultGem.pleochroism,
-            typicalInclusions: defaultGem.inclusions.join(', '),
-            uvReaction: defaultGem.uvResponse,
-            simulants: defaultGem.simulants.join(', '),
-            commonTreatments: defaultGem.treatments.join(', '),
-            occurrences: defaultGem.occurrences.join(', '),
-            indianTradeName: defaultGem.indianName,
-          },
-          actionButtons: {
-            saveToInventory: true,
-            createCertificate: true,
-          },
-    };
+        // Inclusions matching
+        if (inclusions.length > 0) {
+          maxScore += 10;
+          const gemInclusions = gem.inclusions.map(i => i.toLowerCase());
+          const matchingInclusions = inclusions.filter(inc => 
+            gemInclusions.some(gemInc => 
+              gemInc.includes(inc.toLowerCase()) || 
+              inc.toLowerCase().includes(gemInc)
+            )
+          );
+          if (matchingInclusions.length > 0) {
+            const inclusionScore = (matchingInclusions.length / inclusions.length) * 10;
+            score += inclusionScore;
+            reasons.push(`Inclusions ${matchingInclusions.join(', ')} match`);
+          }
+        } else {
+          maxScore += 3;
+        }
 
-    setResult(breakdown);
+        // UV Response matching
+        if (uvResponse.length > 0) {
+          maxScore += 8;
+          if (uvResponse.includes(gem.uvResponse)) {
+            score += 8;
+            reasons.push(`UV Response ${gem.uvResponse} matches`);
+          }
+        } else {
+          maxScore += 2;
+        }
+
+        // User guess bonus
+        if (stoneGuess !== 'Not sure') {
+          maxScore += 5;
+          if (gem.variety.toLowerCase().includes(stoneGuess.toLowerCase()) || 
+              stoneGuess.toLowerCase().includes(gem.variety.toLowerCase())) {
+            score += 5;
+            reasons.push(`Matches user guess: ${stoneGuess}`);
+          }
+        } else {
+          maxScore += 2;
+        }
+
+        const confidence = maxScore > 0 ? (score / maxScore) * 100 : 0;
+        
+        return {
+          gem,
+          score: confidence,
+          reasons: reasons.length > 0 ? reasons : ['Basic match']
+        };
+      }).sort((a, b) => b.score - a.score);
+
+      const primaryMatch = matches[0];
+      const secondary = matches.slice(1, 4);
+
+      if (!primaryMatch || primaryMatch.score < 20) {
+        Alert.alert('Low Confidence', 'Unable to identify with current parameters. Please provide more details.');
         setIsLoading(false);
         return;
       }
 
-      const primaryGem = primary.gem;
-      const confidence = Math.min(100, Math.max(10, primary.score));
-
-      // Generate short reasoning
-      const shortReasoning = {
-        matchRI: !isNaN(ri) && primary.matchRI 
-          ? `RI ${riValue} matches ${primaryGem.variety} range ${primaryGem.riMin}–${primaryGem.riMax}`
-          : !isNaN(ri) 
-            ? `RI ${riValue} is outside ${primaryGem.variety} range ${primaryGem.riMin}–${primaryGem.riMax}`
-            : '',
-        matchSG: !isNaN(sg) && primary.matchSG
-          ? `SG ${sgValue} fits ${primaryGem.variety} SG ${primaryGem.sgMin}–${primaryGem.sgMax}`
-          : !isNaN(sg)
-            ? `SG ${sgValue} is outside ${primaryGem.variety} range ${primaryGem.sgMin}–${primaryGem.sgMax}`
-            : '',
-        matchColor: selectedColors.length && primary.matchColor
-          ? `${selectedColors.join(', ')} is common for ${primaryGem.variety}`
-          : selectedColors.length
-            ? `${selectedColors.join(', ')} is uncommon for ${primaryGem.variety}`
-            : '',
-        matchClarity: transparency && primary.matchClarity
-          ? `${transparency} transparency matches ${primaryGem.variety}`
-          : transparency
-            ? `${transparency} transparency may not match ${primaryGem.variety}`
-            : '',
-      };
-
       const breakdown = {
-        stoneName: primaryGem.variety,
-        confidence: `${confidence}%`,
-        shortReasoning,
+        stoneName: primaryMatch.gem.variety,
+        confidence: `${Math.round(primaryMatch.score)}%`,
+        shortReasoning: {
+          matchRI: !isNaN(ri) ? `RI ${riValue} ${ri >= primaryMatch.gem.riMin && ri <= primaryMatch.gem.riMax ? 'matches' : 'close to'} ${primaryMatch.gem.riMin}–${primaryMatch.gem.riMax}` : '',
+          matchSG: !isNaN(sg) ? `SG ${sgValue} ${sg >= primaryMatch.gem.sgMin && sg <= primaryMatch.gem.sgMax ? 'matches' : 'close to'} ${primaryMatch.gem.sgMin}–${primaryMatch.gem.sgMax}` : '',
+          matchColor: selectedColors.length ? `${selectedColors.join(', ')} ${selectedColors.some(color => primaryMatch.gem.colors.some(gemColor => 
+            gemColor.toLowerCase().includes(color.toLowerCase()) || 
+            color.toLowerCase().includes(gemColor.toLowerCase())
+          )) ? 'matches' : 'partially matches'} ${primaryMatch.gem.variety}` : '',
+          matchClarity: transparency ? `${transparency} transparency ${primaryMatch.gem.transparency.includes(transparency) ? 'matches' : 'not typical for'} ${primaryMatch.gem.variety}` : '',
+        },
         otherPossibleStones: secondary.map(s => ({
           name: s.gem.variety,
-          confidence: `${Math.max(5, Math.min(100, s.score))}%`
+          confidence: `${Math.max(5, Math.min(100, s.score))}%`,
+          reasons: s.reasons
         })),
         gemData: {
-          variety: primaryGem.variety,
-          chemicalComposition: primaryGem.chemicalComposition,
-          crystalSystem: primaryGem.crystalSystem,
-          colorRange: primaryGem.colors.join(', '),
-          causeOfColor: primaryGem.causeOfColor,
-          transparency: primaryGem.transparency.join(', '),
-          luster: primaryGem.luster,
-          hardness: primaryGem.hardness.toString(),
-          specificGravity: `${primaryGem.sgMin}–${primaryGem.sgMax}`,
-          refractiveIndex: `${primaryGem.riMin}–${primaryGem.riMax}`,
-          cleavage: primaryGem.cleavage,
-          fracture: primaryGem.fracture,
-          opticCharacter: primaryGem.opticCharacter,
-          pleochroism: primaryGem.pleochroism,
-          typicalInclusions: primaryGem.inclusions.join(', '),
-          uvReaction: primaryGem.uvResponse,
-          simulants: primaryGem.simulants.join(', '),
-          commonTreatments: primaryGem.treatments.join(', '),
-          occurrences: primaryGem.occurrences.join(', '),
-          indianTradeName: primaryGem.indianName,
+          variety: primaryMatch.gem.variety,
+          chemicalComposition: primaryMatch.gem.chemicalComposition,
+          crystalSystem: primaryMatch.gem.crystalSystem,
+          colorRange: primaryMatch.gem.colors.join(', '),
+          causeOfColor: primaryMatch.gem.causeOfColor,
+          transparency: primaryMatch.gem.transparency.join(', '),
+          luster: primaryMatch.gem.luster,
+          hardness: primaryMatch.gem.hardness.toString(),
+          specificGravity: `${primaryMatch.gem.sgMin}–${primaryMatch.gem.sgMax}`,
+          refractiveIndex: `${primaryMatch.gem.riMin}–${primaryMatch.gem.riMax}`,
+          cleavage: primaryMatch.gem.cleavage,
+          fracture: primaryMatch.gem.fracture,
+          opticCharacter: primaryMatch.gem.opticCharacter,
+          pleochroism: primaryMatch.gem.pleochroism,
+          typicalInclusions: primaryMatch.gem.inclusions.join(', '),
+          uvReaction: primaryMatch.gem.uvResponse,
+          simulants: primaryMatch.gem.simulants.join(', '),
+          commonTreatments: primaryMatch.gem.treatments.join(', '),
+          occurrences: primaryMatch.gem.occurrences.join(', '),
+          indianTradeName: primaryMatch.gem.indianName,
         },
         actionButtons: {
           saveToInventory: true,
@@ -347,11 +524,165 @@ export default function IdentificationLabScreen() {
       } catch (error) {
         console.log('Error logging measurement:', error);
       }
+
+      setShowResultModal(true);
     } catch (error) {
       console.error('Error identifying gemstone:', error);
-      Alert.alert('Error', 'An error occurred while identifying the gemstone. Please try again.');
-    setIsLoading(false);
+      Alert.alert('Error', 'Failed to identify gemstone. Please try again.');
+      setIsLoading(false);
     }
+  };
+
+  // AI Functions
+  const analyzeImageWithAI = async () => {
+    if (!imageUri) {
+      Alert.alert('Error', 'Please select an image first');
+      return;
+    }
+
+    setIsAnalyzingImage(true);
+    try {
+      // Convert image to base64
+      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        encoding: 'base64',
+      });
+
+      // Analyze with Gemini
+      const analysis = await geminiService.analyzeGemstoneImage(base64);
+      setImageAnalysis(analysis);
+
+      // Generate questions based on analysis
+      const observations = {
+        imageAnalysis: analysis.initialAnalysis,
+        visualProperties: analysis.suggestedProperties,
+        manual: {
+          colors: selectedColors,
+          transparency,
+          ri: riValue,
+          sg: sgValue
+        }
+      };
+
+      const questions = await geminiService.generateIdentificationQuestions(observations);
+      setAiQuestions(questions);
+      setShowAIQuestions(true);
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      Alert.alert('Error', 'Failed to analyze image. Please try again.');
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  };
+
+  const handleAIAnswer = (questionId: string, answer: any) => {
+    setAiAnswers(prev => ({
+      ...prev,
+      [questionId]: answer
+    }));
+
+    // Move to next question
+    if (currentQuestionIndex < aiQuestions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      // All questions answered, identify gemstone
+      identifyWithAI();
+    }
+  };
+
+  const identifyWithAI = async () => {
+    setIsLoading(true);
+    try {
+      let imageBase64 = '';
+      if (imageUri) {
+        imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: 'base64',
+        });
+      }
+
+      const observations = {
+        imageAnalysis: imageAnalysis?.initialAnalysis || '',
+        visualProperties: imageAnalysis?.suggestedProperties || {},
+        manual: {
+          colors: selectedColors,
+          transparency,
+          ri: riValue,
+          sg: sgValue,
+          hardness: null, // Could add hardness input
+        }
+      };
+
+      const result = await geminiService.identifyGemstone(
+        imageBase64,
+        observations,
+        aiAnswers
+      );
+
+      setAiResult(result);
+      
+      // Convert to ResultCardData format
+      if (result.matches.length > 0) {
+        const primaryMatch = result.matches[0];
+        const breakdown: ResultCardData = {
+          stoneName: result.gemstone,
+          confidence: `${Math.round(result.confidence * 100)}%`,
+          shortReasoning: {
+            matchRI: result.reasoning,
+            matchSG: '',
+            matchColor: '',
+            matchClarity: '',
+          },
+          otherPossibleStones: result.matches.slice(1).map(m => ({
+            name: m.gemstone.variety,
+            confidence: `${Math.round(m.score * 100)}%`,
+            reasons: m.reasons
+          })),
+          gemData: {
+            variety: primaryMatch.gemstone.variety,
+            chemicalComposition: primaryMatch.gemstone.chemicalComposition,
+            crystalSystem: primaryMatch.gemstone.crystalSystem,
+            colorRange: primaryMatch.gemstone.colors.join(', '),
+            causeOfColor: primaryMatch.gemstone.causeOfColor,
+            transparency: primaryMatch.gemstone.transparency.join(', '),
+            luster: primaryMatch.gemstone.luster,
+            hardness: primaryMatch.gemstone.hardness.toString(),
+            specificGravity: `${primaryMatch.gemstone.sgMin}–${primaryMatch.gemstone.sgMax}`,
+            refractiveIndex: `${primaryMatch.gemstone.riMin}–${primaryMatch.gemstone.riMax}`,
+            cleavage: primaryMatch.gemstone.cleavage,
+            fracture: primaryMatch.gemstone.fracture,
+            opticCharacter: primaryMatch.gemstone.opticCharacter,
+            pleochroism: primaryMatch.gemstone.pleochroism,
+            typicalInclusions: primaryMatch.gemstone.inclusions.join(', '),
+            uvReaction: primaryMatch.gemstone.uvResponse,
+            simulants: primaryMatch.gemstone.simulants.join(', '),
+            commonTreatments: primaryMatch.gemstone.treatments.join(', '),
+            occurrences: primaryMatch.gemstone.occurrences.join(', '),
+            indianTradeName: primaryMatch.gemstone.indianName,
+          },
+          actionButtons: {
+            saveToInventory: true,
+            createCertificate: true,
+          },
+        };
+        setResult(breakdown);
+        setShowResultModal(true);
+      }
+    } catch (error) {
+      console.error('Error with AI identification:', error);
+      Alert.alert('Error', 'Failed to identify with AI. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setShowAIQuestions(false);
+      setCurrentQuestionIndex(0);
+    }
+  };
+
+  const resetAI = () => {
+    setAiQuestions([]);
+    setAiAnswers({});
+    setCurrentQuestionIndex(0);
+    setShowAIQuestions(false);
+    setImageAnalysis(null);
+    setAiResult(null);
   };
 
   return (
@@ -425,6 +756,20 @@ export default function IdentificationLabScreen() {
                   >
                     <Feather name="trash-2" size={16} color="#FFFFFF" />
                     <ThemedText style={[styles.photoActionText, { color: '#FFFFFF', marginLeft: 6 }]}>Remove</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.photoActionButton, { backgroundColor: theme.success }]}
+                    onPress={analyzeImageWithAI}
+                    disabled={isAnalyzingImage}
+                  >
+                    {isAnalyzingImage ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Feather name="cpu" size={16} color="#FFFFFF" />
+                    )}
+                    <ThemedText style={[styles.photoActionText, { color: '#FFFFFF', marginLeft: 6 }]}>
+                      {isAnalyzingImage ? 'Analyzing...' : 'AI Analyze'}
+                    </ThemedText>
                   </TouchableOpacity>
                 </View>
               </>
@@ -550,7 +895,7 @@ export default function IdentificationLabScreen() {
                       styles.segmentedButtonText,
                         { 
                           color: isSelected ? theme.buttonText : theme.text,
-                          fontWeight: isSelected ? '600' : '500',
+                          fontWeight: isSelected ? '500' : '400',
                         }
                     ]}
                   >
@@ -603,6 +948,33 @@ export default function IdentificationLabScreen() {
           >
             {isLoading ? 'Identifying…' : 'Identify Stone'}
           </Button>
+          
+          {/* AI Identification Button */}
+          {imageUri && (
+            <Button
+              onPress={analyzeImageWithAI}
+              disabled={isAnalyzingImage}
+              size="lg"
+              style={[styles.identifyButton, { backgroundColor: theme.success, marginTop: Spacing.md }]}
+            >
+              {isAnalyzingImage ? (
+                <>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ThemedText style={{ color: '#FFFFFF', marginLeft: Spacing.sm }}>
+                    AI Analyzing...
+                  </ThemedText>
+                </>
+              ) : (
+                <>
+                  <Feather name="cpu" size={16} color="#FFFFFF" />
+                  <ThemedText style={{ color: '#FFFFFF', marginLeft: Spacing.sm }}>
+                    AI Identification
+                  </ThemedText>
+                </>
+              )}
+            </Button>
+          )}
+          
           {isLoading ? (
             <View style={{ alignItems: 'center', marginTop: Spacing.md }}>
               <ActivityIndicator size="small" color={theme.primary} />
@@ -1003,6 +1375,18 @@ export default function IdentificationLabScreen() {
                     setShowResultModal(false);
                   }}
                 />
+                
+                {/* Buying Guide Button */}
+                <Button
+                  onPress={() => setShowBuyingGuide(true)}
+                  style={[styles.buyingGuideButton, { backgroundColor: theme.success, marginTop: Spacing.md }]}
+                >
+                  <Feather name="shopping-cart" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
+                  <ThemedText style={{ color: '#FFFFFF', fontWeight: '700' }}>
+                    Buying Guide & Pricing
+                  </ThemedText>
+                </Button>
+                
                 <Button
                   onPress={() => {
                     setResult(null);
@@ -1019,6 +1403,396 @@ export default function IdentificationLabScreen() {
               </View>
             )}
       </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* AI Questions Modal */}
+      <Modal
+        visible={showAIQuestions}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setShowAIQuestions(false);
+          resetAI();
+        }}
+      >
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+          <View style={[styles.header, { borderBottomColor: theme.border }]}>
+            <TouchableOpacity onPress={() => {
+              setShowAIQuestions(false);
+              resetAI();
+            }}>
+              <Feather name="x" size={24} color={theme.text} />
+            </TouchableOpacity>
+            <ThemedText type="h3">AI Identification</ThemedText>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {imageAnalysis && (
+              <Card style={{ marginBottom: Spacing.lg }}>
+                <ThemedText type="h4" style={{ marginBottom: Spacing.sm, color: theme.primary }}>
+                  Image Analysis:
+                </ThemedText>
+                <ThemedText style={{ color: theme.textSecondary, lineHeight: 22 }}>
+                  {imageAnalysis.initialAnalysis}
+                </ThemedText>
+                {imageAnalysis.confidence > 0 && (
+                  <ThemedText style={{ marginTop: Spacing.sm, color: theme.textSecondary }}>
+                    Confidence: {Math.round(imageAnalysis.confidence * 100)}%
+                  </ThemedText>
+                )}
+              </Card>
+            )}
+
+            {aiQuestions.length > 0 && currentQuestionIndex < aiQuestions.length && (
+              <Card style={{ marginBottom: Spacing.lg }}>
+                <View style={{ marginBottom: Spacing.md }}>
+                  <ThemedText style={{ color: theme.textSecondary, marginBottom: Spacing.xs }}>
+                    Question {currentQuestionIndex + 1} of {aiQuestions.length}
+                  </ThemedText>
+                  <View style={{
+                    height: 4,
+                    backgroundColor: theme.backgroundSecondary,
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                  }}>
+                    <View style={{
+                      height: '100%',
+                      width: `${((currentQuestionIndex + 1) / aiQuestions.length) * 100}%`,
+                      backgroundColor: theme.primary,
+                    }} />
+                  </View>
+                </View>
+
+                <ThemedText type="h4" style={{ marginBottom: Spacing.lg }}>
+                  {aiQuestions[currentQuestionIndex].question}
+                </ThemedText>
+
+                {aiQuestions[currentQuestionIndex].type === 'multiple' && aiQuestions[currentQuestionIndex].options && (
+                  <View style={{ gap: Spacing.sm }}>
+                    {aiQuestions[currentQuestionIndex].options.map((option, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={[
+                          styles.optionButton,
+                          {
+                            backgroundColor: theme.backgroundSecondary,
+                            borderColor: theme.border,
+                          }
+                        ]}
+                        onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, option)}
+                      >
+                        <ThemedText>{option}</ThemedText>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {aiQuestions[currentQuestionIndex].type === 'binary' && (
+                  <View style={{ flexDirection: 'row', gap: Spacing.md }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.optionButton,
+                        styles.binaryButton,
+                        { backgroundColor: theme.success }
+                      ]}
+                      onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, true)}
+                    >
+                      <ThemedText style={{ color: '#FFFFFF' }}>Yes</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.optionButton,
+                        styles.binaryButton,
+                        { backgroundColor: theme.danger }
+                      ]}
+                      onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, false)}
+                    >
+                      <ThemedText style={{ color: '#FFFFFF' }}>No</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {aiQuestions[currentQuestionIndex].type === 'text' && (
+                  <Input
+                    placeholder="Enter your answer..."
+                    onChangeText={(text) => handleAIAnswer(aiQuestions[currentQuestionIndex].id, text)}
+                    multiline
+                    numberOfLines={3}
+                  />
+                )}
+              </Card>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Buying Guide Modal */}
+      <Modal
+        visible={showBuyingGuide}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowBuyingGuide(false)}
+      >
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+            <ThemedText type="h3">Buying Guide & Pricing</ThemedText>
+            <TouchableOpacity
+              onPress={() => setShowBuyingGuide(false)}
+              style={[styles.closeButton, { backgroundColor: theme.backgroundSecondary }]}
+            >
+              <Feather name="x" size={24} color={theme.text} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView 
+            style={styles.modalScrollView}
+            contentContainerStyle={styles.modalContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {result?.gemData && (
+              <>
+                {/* Quick Optical Tests Section - First */}
+                <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                  <View style={styles.buyingGuideHeader}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      QUICK OPTICAL TESTS
+                    </ThemedText>
+                    <Pressable
+                      onPress={() => setIsEditing(!isEditing)}
+                      style={({ pressed }) => [
+                        styles.editButton,
+                        { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+                      ]}
+                    >
+                      <Feather name="edit-2" size={16} color={theme.primary} />
+                    </Pressable>
+                  </View>
+                  
+                  {/* Quick Optical Tests with Checkboxes */}
+                  {opticalTests.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => toggleCheck(item.id)}
+                      style={({ pressed }) => [
+                        styles.checklistItem,
+                        { 
+                          backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                          opacity: pressed ? 0.8 : 1
+                        }
+                      ]}
+                    >
+                      <View style={[styles.checkbox, { 
+                        borderColor: item.checked ? theme.success : theme.border,
+                        backgroundColor: item.checked ? theme.success : 'transparent'
+                      }]}>
+                        {item.checked && (
+                          <Feather name="check" size={14} color="#FFFFFF" />
+                        )}
+                      </View>
+                      <ThemedText type="body" style={[
+                        styles.checklistText,
+                        { 
+                          color: item.checked ? theme.success : theme.text,
+                          textDecorationLine: item.checked ? 'line-through' : 'none'
+                        }
+                      ]}>
+                        {item.text}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </Card>
+
+                {/* Buying Checklist Card - Second */}
+                <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                  <View style={styles.buyingGuideHeader}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      BUYING CHECKLIST & PRICING
+                    </ThemedText>
+                    <Pressable
+                      onPress={() => setShowCalculator(!showCalculator)}
+                      style={({ pressed }) => [
+                        styles.editButton,
+                        { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+                      ]}
+                    >
+                      <Feather name="dollar-sign" size={16} color={theme.primary} />
+                    </Pressable>
+                  </View>
+
+                  {checklist.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => toggleCheck(item.id)}
+                      style={({ pressed }) => [
+                        styles.checklistItem,
+                        { 
+                          backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                          opacity: pressed ? 0.8 : 1
+                        }
+                      ]}
+                    >
+                      <View style={[styles.checkbox, { 
+                        borderColor: item.checked ? theme.success : theme.border,
+                        backgroundColor: item.checked ? theme.success : 'transparent'
+                      }]}>
+                        {item.checked && (
+                          <Feather name="check" size={14} color="#FFFFFF" />
+                        )}
+                      </View>
+                      <ThemedText type="body" style={[
+                        styles.checklistText,
+                        { 
+                          color: item.checked ? theme.success : theme.text,
+                          textDecorationLine: item.checked ? 'line-through' : 'none'
+                        }
+                      ]}>
+                        {item.text}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+
+                  {/* Pricing Calculator Section */}
+                  {showCalculator && (
+                    <View style={[styles.calculatorSection, { backgroundColor: theme.backgroundSecondary }]}>
+                      <ThemedText type="h4" style={{ color: theme.text, marginBottom: Spacing.md }}>
+                        Quick Pricing Calculator
+                      </ThemedText>
+                      
+                      {/* Carat Weight Input */}
+                      <View style={styles.inputRow}>
+                        <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                          Carat Weight:
+                        </ThemedText>
+                        <TextInput
+                          style={[styles.calculatorInput, { 
+                            backgroundColor: theme.inputBackground,
+                            color: theme.text,
+                            borderColor: theme.border
+                          }]}
+                          placeholder="Enter carats"
+                          placeholderTextColor={theme.textSecondary}
+                          value={caratWeight}
+                          onChangeText={setCaratWeight}
+                          keyboardType="numeric"
+                        />
+                      </View>
+
+                      {/* Quality Grade Selector */}
+                      <View style={styles.inputRow}>
+                        <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                          Quality Grade:
+                        </ThemedText>
+                        <View style={styles.gradeSelector}>
+                          {(['A', 'B', 'C', 'D'] as const).map(grade => (
+                            <Pressable
+                              key={grade}
+                              onPress={() => setQualityGrade(grade)}
+                              style={[
+                                styles.gradeButton,
+                                { 
+                                  backgroundColor: qualityGrade === grade ? theme.primary : theme.inputBackground,
+                                  borderColor: theme.border
+                                }
+                              ]}
+                            >
+                              <ThemedText type="caption" style={{ 
+                                color: qualityGrade === grade ? '#FFFFFF' : theme.text,
+                                fontWeight: qualityGrade === grade ? '700' : '500'
+                              }}>
+                                {grade}
+                              </ThemedText>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </View>
+
+                      {/* Custom Price Per Carat */}
+                      <View style={styles.inputRow}>
+                        <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                          Custom Price/ct:
+                        </ThemedText>
+                        <TextInput
+                          style={[styles.calculatorInput, { 
+                            backgroundColor: theme.inputBackground,
+                            color: theme.text,
+                            borderColor: theme.border
+                          }]}
+                          placeholder="Enter custom price per carat"
+                          placeholderTextColor={theme.textSecondary}
+                          value={customPricePerCarat}
+                          onChangeText={setCustomPricePerCarat}
+                          keyboardType="numeric"
+                        />
+                      </View>
+
+                      {/* Price Adjustment */}
+                      <View style={styles.inputRow}>
+                        <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                          Adjustment %:
+                        </ThemedText>
+                        <TextInput
+                          style={[styles.calculatorInput, { 
+                            backgroundColor: theme.inputBackground,
+                            color: theme.text,
+                            borderColor: theme.border
+                          }]}
+                          placeholder="+/- %"
+                          placeholderTextColor={theme.textSecondary}
+                          value={priceAdjustment}
+                          onChangeText={setPriceAdjustment}
+                          keyboardType="numeric"
+                        />
+                      </View>
+
+                      {/* Calculate Button */}
+                      <Pressable
+                        onPress={calculatePrice}
+                        style={({ pressed }) => [
+                          styles.calculateButton,
+                          { 
+                            backgroundColor: theme.primary,
+                            opacity: pressed ? 0.8 : 1
+                          }
+                        ]}
+                      >
+                        <Feather name="dollar-sign" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
+                        <ThemedText type="body" style={{ color: "#FFFFFF", fontWeight: '700' }}>
+                          Calculate Price
+                        </ThemedText>
+                      </Pressable>
+
+                      {/* Calculated Price Display */}
+                      {calculatedPrice && (
+                        <View style={[styles.priceResult, { backgroundColor: theme.success + "15" }]}>
+                          <ThemedText type="h4" style={{ color: theme.success, fontWeight: '800', textAlign: 'center' }}>
+                            Estimated Price
+                          </ThemedText>
+                          <View style={styles.priceRow}>
+                            <ThemedText type="body" style={{ color: theme.textSecondary }}>
+                              INR: 
+                            </ThemedText>
+                            <ThemedText type="h4" style={{ color: theme.success, fontWeight: '800' }}>
+                              ₹{calculatedPrice.inr.toLocaleString()}
+                            </ThemedText>
+                          </View>
+                          <View style={styles.priceRow}>
+                            <ThemedText type="body" style={{ color: theme.textSecondary }}>
+                              USD: 
+                            </ThemedText>
+                            <ThemedText type="h4" style={{ color: theme.primary, fontWeight: '800' }}>
+                              ${calculatedPrice.usd.toLocaleString()}
+                            </ThemedText>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </Card>
+              </>
+            )}
+          </ScrollView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -1175,7 +1949,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   segmentedButtonText: {
-    fontSize: 14,
+    fontSize: 12,
+  },
+  optionButton: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  binaryButton: {
+    flex: 1,
+    paddingVertical: Spacing.lg,
   },
   measurementRow: {
     flexDirection: 'row',
@@ -1282,5 +2066,100 @@ const styles = StyleSheet.create({
   },
   resetButton: {
     marginTop: Spacing.lg,
+  },
+  buyingGuideButton: {
+    marginTop: Spacing.md,
+  },
+  // Buying Guide Styles
+  propertyCard: {
+    marginBottom: Spacing.lg,
+  },
+  buyingGuideHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  cardSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  editButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    marginBottom: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12, // Circular
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  checklistText: {
+    flex: 1,
+    fontSize: 14,
+  },
+  // Pricing Calculator Styles
+  calculatorSection: {
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  calculatorInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    fontSize: 16,
+  },
+  gradeSelector: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  gradeButton: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+  },
+  calculateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.md,
+  },
+  priceResult: {
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
   },
 });
