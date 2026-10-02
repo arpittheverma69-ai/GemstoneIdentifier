@@ -22,7 +22,6 @@ import {
   approveAccessRequest,
   rejectAccessRequest,
   getUserRoleAndAccessInfo,
-  isKnownAdminEmail,
 } from "@/services/accessRequestService";
 
 export default function PendingUsersScreen() {
@@ -44,16 +43,9 @@ export default function PendingUsersScreen() {
     if (!user) return;
     try {
       const info = await getUserRoleAndAccessInfo(user.id, user.email);
-      if (isKnownAdminEmail(user.email)) {
-        setUserRole("Admin");
-      } else {
-        setUserRole(info.role);
-      }
+      setUserRole(info.role);
     } catch (error) {
       console.error("Error loading user role in PendingUsersScreen:", error);
-      if (isKnownAdminEmail(user.email)) {
-        setUserRole("Admin");
-      }
     }
   };
 
@@ -187,9 +179,9 @@ export default function PendingUsersScreen() {
     loadPendingUsers();
   };
 
-  const isUserAdmin = userRole === "Admin" || isKnownAdminEmail(user?.email);
+  const isUserAdmin = userRole === "Admin" || userRole === "Curator";
 
-  // Only Admins can access this management screen
+  // Only Admins and Curators can access this management screen
   if (!isUserAdmin) {
     return (
       <ThemedView style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>

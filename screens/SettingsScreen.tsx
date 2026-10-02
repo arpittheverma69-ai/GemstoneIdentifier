@@ -21,7 +21,6 @@ import {
   getUserRoleAndAccessInfo,
   getAllPendingRequests,
   PendingUserRequest,
-  isKnownAdminEmail,
 } from "@/services/accessRequestService";
 
 interface UserProfile {
@@ -68,34 +67,32 @@ export default function SettingsScreen() {
     try {
       setIsLoading(true);
       const accessInfo = await getUserRoleAndAccessInfo(user.id, user.email);
-      const isAdmin = accessInfo.role === "Admin" || isKnownAdminEmail(user.email);
 
       setUserProfile({
         id: user.id,
         email: user.email || "",
-        role: isAdmin ? "Admin" : accessInfo.role,
-        can_edit: isAdmin || accessInfo.can_edit,
-        can_add: isAdmin || accessInfo.can_add,
-        can_approve: isAdmin || accessInfo.can_approve,
+        role: accessInfo.role,
+        can_edit: accessInfo.can_edit,
+        can_add: accessInfo.can_add,
+        can_approve: accessInfo.can_approve,
       });
 
       setPendingRequest(accessInfo.pendingRequest);
 
-      // If user is Admin, check how many pending requests exist
-      if (isAdmin) {
+      // If user is Admin or Curator, check how many pending requests exist
+      if (accessInfo.role === "Admin" || accessInfo.role === "Curator") {
         const pendingList = await getAllPendingRequests();
         setPendingUsersCount(pendingList.length);
       }
     } catch (error) {
       console.error("Error in loadProfileAndAccess:", error);
-      const isAdmin = isKnownAdminEmail(user.email);
       setUserProfile({
         id: user.id,
         email: user.email || "",
-        role: isAdmin ? "Admin" : "Looker",
-        can_edit: isAdmin,
-        can_add: isAdmin,
-        can_approve: isAdmin,
+        role: "Looker",
+        can_edit: false,
+        can_add: false,
+        can_approve: false,
       });
     } finally {
       setIsLoading(false);

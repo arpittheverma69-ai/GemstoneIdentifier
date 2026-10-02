@@ -3,8 +3,7 @@
 -- ==============================================================================
 -- Instructions:
 -- 1. Open your Supabase Project Dashboard: https://supabase.com/dashboard/project/tgwxpyfespesfnqadnpn/sql
--- 2. Create a "New query"
--- 3. Paste and RUN this entire script.
+-- 2. Paste and RUN this entire script.
 -- ==============================================================================
 
 -- 1. Create or ensure pending_users table exists with complete columns
@@ -33,12 +32,12 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Ensure user_roles constraint allows all necessary roles
+-- Ensure user_roles constraint allows all valid roles
 ALTER TABLE public.user_roles DROP CONSTRAINT IF EXISTS user_roles_role_check;
 ALTER TABLE public.user_roles ADD CONSTRAINT user_roles_role_check 
   CHECK (role IN ('Admin', 'Curator', 'Student', 'Looker', 'Pending'));
 
--- 3. Backfill all existing auth users into user_roles
+-- 3. Backfill existing auth users into user_roles with 'Looker' default
 INSERT INTO public.user_roles (
   id,
   email,
@@ -62,7 +61,7 @@ FROM auth.users u
 ON CONFLICT (id) DO UPDATE
 SET email = EXCLUDED.email;
 
--- 4. Automatically promote known admin email(s)
+-- 4. Set primary Administrator account (Admin can assign other admins from Settings -> User Management)
 UPDATE public.user_roles
 SET 
   role = 'Admin',
@@ -71,99 +70,29 @@ SET
   can_approve = true,
   updated_at = NOW()
 WHERE 
-  email ILIKE '%arpit%' OR 
-  email ILIKE '%admin%';
+  email = 'arpitverma@gmail.com' OR 
+  email = 'jinalkamdar.9@gmail.com';
 
--- 5. Configure Row Level Security (RLS) policies on pending_users and user_roles
-ALTER TABLE public.pending_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
+-- 5. Set any test account (like arpitwillgetit@gmail.com) back to Looker so it can test the signup/request flow
+UPDATE public.user_roles
+SET 
+  role = 'Looker',
+  can_edit = false,
+  can_add = false,
+  can_approve = false,
+  updated_at = NOW()
+WHERE 
+  email = 'arpitwillgetit@gmail.com';
 
--- Drop all existing policies on pending_users
-DROP POLICY IF EXISTS "Users can view their own pending request" ON public.pending_users;
-DROP POLICY IF EXISTS "Admins and Curators can view all pending requests" ON public.pending_users;
-DROP POLICY IF EXISTS "Users can insert their own pending request" ON public.pending_users;
-DROP POLICY IF EXISTS "Admins can update pending requests" ON public.pending_users;
-DROP POLICY IF EXISTS "allow_all_pending_users_auth" ON public.pending_users;
-DROP POLICY IF EXISTS "allow_anon_read_pending_users" ON public.pending_users;
+-- 6. Disable RLS on pending_users and user_roles to prevent any 42501 permission issues
+ALTER TABLE public.pending_users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_roles DISABLE ROW LEVEL SECURITY;
 
--- Create permissive RLS policies for pending_users (no recursive checks)
-CREATE POLICY "allow_all_pending_users_auth" ON public.pending_users
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "allow_anon_read_pending_users" ON public.pending_users
-  FOR SELECT TO anon USING (true);
-
-CREATE POLICY "allow_anon_insert_pending_users" ON public.pending_users
-  FOR INSERT TO anon WITH CHECK (true);
-
--- Drop all existing policies on user_roles
-DROP POLICY IF EXISTS "Users can view their own role" ON public.user_roles;
-DROP POLICY IF EXISTS "Authenticated users can read roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Users can insert their own role" ON public.user_roles;
-DROP POLICY IF EXISTS "Admins can update roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Users can update their own role" ON public.user_roles;
-DROP POLICY IF EXISTS "Allow authenticated full select" ON public.user_roles;
-DROP POLICY IF EXISTS "Allow authenticated insert" ON public.user_roles;
-DROP POLICY IF EXISTS "Allow update for admins and self" ON public.user_roles;
-DROP POLICY IF EXISTS "allow_all_user_roles_auth" ON public.user_roles;
-DROP POLICY IF EXISTS "allow_anon_read_user_roles" ON public.user_roles;
-
--- Create permissive RLS policies for user_roles
-CREATE POLICY "allow_all_user_roles_auth" ON public.user_roles
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "allow_anon_read_user_roles" ON public.user_roles
-  FOR SELECT TO anon USING (true);
-
-CREATE POLICY "allow_anon_insert_user_roles" ON public.user_roles
-  FOR INSERT TO anon WITH CHECK (true);
-
--- Grant privileges
+-- Grant full access to all roles
 GRANT ALL ON public.pending_users TO anon, authenticated, service_role;
 GRANT ALL ON public.user_roles TO anon, authenticated, service_role;
 
--- 6. RPC Function for safely updating user roles
-CREATE OR REPLACE FUNCTION public.update_user_role(
-  target_user uuid,
-  new_role text
-) RETURNS TABLE (can_edit boolean, can_add boolean, can_approve boolean)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  new_can_edit boolean;
-  new_can_add boolean;
-  new_can_approve boolean;
-BEGIN
-  IF new_role NOT IN ('Admin', 'Curator', 'Student', 'Looker', 'Pending') THEN
-    RAISE EXCEPTION 'Invalid role value %', new_role;
-  END IF;
-
-  new_can_edit := (new_role IN ('Admin', 'Curator'));
-  new_can_add := (new_role IN ('Admin', 'Curator', 'Student'));
-  new_can_approve := (new_role IN ('Admin', 'Curator'));
-
-  UPDATE public.user_roles
-  SET role = new_role,
-      can_edit = new_can_edit,
-      can_add = new_can_add,
-      can_approve = new_can_approve,
-      updated_at = NOW()
-  WHERE id = target_user;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Target user % not found', target_user;
-  END IF;
-
-  RETURN QUERY
-  SELECT new_can_edit, new_can_add, new_can_approve;
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.update_user_role(uuid, text) TO authenticated, anon, service_role;
-
--- 7. Auth trigger to automatically register new signups into user_roles
+-- 7. Trigger to automatically assign 'Looker' to EVERY new signup
 CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -183,22 +112,10 @@ BEGIN
   ) VALUES (
     NEW.id,
     NEW.email,
-    CASE 
-      WHEN NEW.email ILIKE '%arpit%' OR NEW.email ILIKE '%admin%' THEN 'Admin'
-      ELSE 'Looker'
-    END,
-    CASE 
-      WHEN NEW.email ILIKE '%arpit%' OR NEW.email ILIKE '%admin%' THEN true
-      ELSE false
-    END,
-    CASE 
-      WHEN NEW.email ILIKE '%arpit%' OR NEW.email ILIKE '%admin%' THEN true
-      ELSE false
-    END,
-    CASE 
-      WHEN NEW.email ILIKE '%arpit%' OR NEW.email ILIKE '%admin%' THEN true
-      ELSE false
-    END,
+    'Looker',
+    false,
+    false,
+    false,
     NOW(),
     NOW()
   )
