@@ -194,10 +194,16 @@ export async function signUp(
   }
 
   try {
+    const redirectUrl =
+      typeof window !== "undefined" && window.location?.origin
+        ? `${window.location.origin}`
+        : "https://www.gemspy.in";
+
     const signUpPromise = supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo: `${redirectUrl}/`,
         data: {
           full_name: fullName,
         },
@@ -400,8 +406,13 @@ export async function resetPassword(
   }
 
   try {
+    const redirectUrl =
+      typeof window !== "undefined" && window.location?.origin
+        ? `${window.location.origin}`
+        : "https://www.gemspy.in";
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "gemaipro://reset-password",
+      redirectTo: `${redirectUrl}/`,
     });
 
     if (error) {
