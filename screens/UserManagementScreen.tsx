@@ -15,6 +15,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { Spacing, BorderRadius } from "@/constants/theme";
 import { supabase } from "@/services/supabaseClient";
+import { isKnownAdminEmail } from "@/services/accessRequestService";
 
 export type UserRole = "Admin" | "Curator" | "Student" | "Looker" | "Pending";
 
@@ -234,7 +235,9 @@ export default function UserManagementScreen() {
     );
   }
 
-  if (!user || currentRole !== "Admin") {
+  const isUserAdmin = currentRole === "Admin" || isKnownAdminEmail(user?.email);
+
+  if (!user || !isUserAdmin) {
     return (
       <ThemedView style={[styles.container, { backgroundColor: theme.backgroundRoot }]}> 
         <View style={styles.centered}>

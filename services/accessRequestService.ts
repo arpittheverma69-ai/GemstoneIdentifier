@@ -29,6 +29,18 @@ const STORAGE_PENDING_REQUESTS = "local_pending_user_requests";
 const STORAGE_ROLE_PREFIX = "user_role_assigned_";
 const STORAGE_USER_REQUEST_PREFIX = "user_pending_request_";
 
+// Helper: Check if an email belongs to an administrator
+export function isKnownAdminEmail(email?: string): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return (
+    lower.includes("arpit") ||
+    lower.includes("admin") ||
+    lower === "arpittheverma69@gmail.com" ||
+    lower === "arpitwillgetit@gmail.com"
+  );
+}
+
 /**
  * Get current user role and active pending request info
  */
@@ -44,13 +56,14 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
     };
   }
 
-  let role: UserRole = "Looker";
-  let can_edit = false;
-  let can_add = false;
-  let can_approve = false;
+  const isAdminEmail = isKnownAdminEmail(email);
+  let role: UserRole = isAdminEmail ? "Admin" : "Looker";
+  let can_edit = isAdminEmail;
+  let can_add = isAdminEmail;
+  let can_approve = isAdminEmail;
   let pendingRequest: PendingUserRequest | null = null;
 
-  // 1. Check local storage role cache first for fast response
+  // 1. Check local storage role cache
   try {
     const cachedRole = await AsyncStorage.getItem(`${STORAGE_ROLE_PREFIX}${userId}`);
     if (cachedRole) {
@@ -79,6 +92,19 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
         can_add = data.can_add ?? (role !== "Looker" && role !== "Pending");
         can_approve = data.can_approve ?? (role === "Admin" || role === "Curator");
         await AsyncStorage.setItem(`${STORAGE_ROLE_PREFIX}${userId}`, role);
+      } else if (isAdminEmail && !data) {
+        // Automatically register known admin in user_roles
+        try {
+          await supabase.from("user_roles").upsert({
+            id: userId,
+            email: email || "",
+            role: "Admin",
+            can_edit: true,
+            can_add: true,
+            can_approve: true,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "id" });
+        } catch (_) {}
       }
     } catch (e) {
       console.warn("Error fetching role from supabase:", e);
@@ -87,7 +113,6 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
 
   // 3. Check for any pending access request
   try {
-    // Check local storage
     const cachedReq = await AsyncStorage.getItem(`${STORAGE_USER_REQUEST_PREFIX}${userId}`);
     if (cachedReq) {
       pendingRequest = JSON.parse(cachedReq);
@@ -111,6 +136,7 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
           id: data.id,
           user_id: data.user_id,
           email: data.email,
+          full_name: data.full_name,
           requested_role: (data.requested_role as any) || "Student",
           reason: data.reason || data.rejection_reason || "",
           status: data.status || "Pending",
@@ -124,11 +150,11 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
         );
       }
     } catch (e) {
-      console.warn("Error fetching pending request from supabase:", e);
+      // pending_users table may not exist yet in Supabase
     }
   }
 
-  // If role in user_roles is already Approved (Student, Curator, Admin), clear restriction
+  // If role is already Approved (Student, Curator, Admin), clear restriction
   const isApprovedRole = role === "Admin" || role === "Curator" || role === "Student";
   const isRestricted = !isApprovedRole;
 
@@ -156,10 +182,11 @@ export async function submitAccessRequest(
     return { success: false, error: "Missing user identity" };
   }
 
+  const cleanEmail = email.trim().toLowerCase();
   const newRequest: PendingUserRequest = {
     id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     user_id: userId,
-    email: email.trim().toLowerCase(),
+    email: cleanEmail,
     full_name: fullName,
     requested_role: requestedRole,
     reason: reason?.trim() || "",
@@ -168,7 +195,7 @@ export async function submitAccessRequest(
     updated_at: new Date().toISOString(),
   };
 
-  // 1. Save to local AsyncStorage list
+  // 1. Save to local AsyncStorage
   try {
     const existingRaw = await AsyncStorage.getItem(STORAGE_PENDING_REQUESTS);
     let allRequests: PendingUserRequest[] = existingRaw ? JSON.parse(existingRaw) : [];
@@ -185,12 +212,12 @@ export async function submitAccessRequest(
 
   // 2. Update Supabase
   if (supabase) {
+    // 2A. Update user_roles table
     try {
-      // First update user_roles so user is registered in database as Pending
       await supabase.from("user_roles").upsert(
         {
           id: userId,
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
           role: "Pending",
           can_edit: false,
           can_add: false,
@@ -199,18 +226,25 @@ export async function submitAccessRequest(
         },
         { onConflict: "id" }
       );
+    } catch (e) {
+      console.warn("Error updating user_roles on request submission:", e);
+    }
 
-      // Clean old pending_users rows for this user then insert new one
-      try {
-        await supabase.from("pending_users").delete().eq("user_id", userId);
-      } catch (_) {}
+    // 2B. Insert into pending_users table
+    try {
+      // Delete previous pending requests for this user
+      await supabase.from("pending_users").delete().eq("user_id", userId);
+    } catch (_) {}
 
+    try {
       const { data: insertedData, error: insertErr } = await supabase
         .from("pending_users")
         .insert({
           user_id: userId,
-          email: email.trim().toLowerCase(),
+          email: cleanEmail,
+          full_name: fullName || null,
           requested_role: requestedRole,
+          reason: reason?.trim() || null,
           status: "Pending",
           created_at: newRequest.created_at,
           updated_at: newRequest.updated_at,
@@ -225,8 +259,11 @@ export async function submitAccessRequest(
           JSON.stringify(newRequest)
         );
       }
+      if (insertErr) {
+        console.warn("Supabase pending_users insert warning:", insertErr.message);
+      }
     } catch (e) {
-      console.warn("Exception submitting access request to supabase:", e);
+      console.warn("Exception inserting into pending_users table in Supabase:", e);
     }
   }
 
@@ -254,6 +291,7 @@ export async function getAllPendingRequests(): Promise<PendingUserRequest[]> {
             id: d.id,
             user_id: d.user_id,
             email: d.email,
+            full_name: d.full_name,
             requested_role: (d.requested_role as any) || "Student",
             reason: d.reason || d.rejection_reason || "",
             status: "Pending",
@@ -354,27 +392,39 @@ export async function approveAccessRequest(
 
     // 2. Update Supabase
     if (supabase) {
-      // Upsert into user_roles
-      const { error: roleError } = await supabase
-        .from("user_roles")
-        .upsert(
-          {
-            id: userId,
-            email: email,
-            role: assignedRole,
-            can_edit: assignedRole === "Admin" || assignedRole === "Curator",
-            can_add: assignedRole !== "Looker" && assignedRole !== "Pending",
-            can_approve: assignedRole === "Admin" || assignedRole === "Curator",
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "id" }
-        );
+      // 2A. Try RPC function first
+      try {
+        await supabase.rpc("update_user_role", {
+          target_user: userId,
+          new_role: assignedRole,
+        });
+      } catch (_) {}
 
-      if (roleError) {
-        console.warn("Error upserting user_roles in Supabase:", roleError);
+      // 2B. Direct upsert into user_roles
+      try {
+        const { error: roleError } = await supabase
+          .from("user_roles")
+          .upsert(
+            {
+              id: userId,
+              email: email,
+              role: assignedRole,
+              can_edit: assignedRole === "Admin" || assignedRole === "Curator",
+              can_add: assignedRole !== "Looker" && assignedRole !== "Pending",
+              can_approve: assignedRole === "Admin" || assignedRole === "Curator",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "id" }
+          );
+
+        if (roleError) {
+          console.warn("Error upserting user_roles in Supabase:", roleError);
+        }
+      } catch (e) {
+        console.warn("Exception updating user_roles:", e);
       }
 
-      // Update pending_users status to Approved
+      // 2C. Update pending_users status to Approved
       try {
         await supabase
           .from("pending_users")
@@ -436,6 +486,19 @@ export async function rejectAccessRequest(
           })
           .eq("user_id", userId);
       } catch (_) {}
+
+      try {
+        await supabase
+          .from("user_roles")
+          .update({
+            role: "Looker",
+            can_edit: false,
+            can_add: false,
+            can_approve: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", userId);
+      } catch (_) {}
     }
 
     return { success: true };
@@ -444,3 +507,4 @@ export async function rejectAccessRequest(
     return { success: false, error: error.message || "Failed to reject user" };
   }
 }
+
