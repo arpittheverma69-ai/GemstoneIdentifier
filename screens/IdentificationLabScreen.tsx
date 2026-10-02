@@ -14,30 +14,33 @@ import { Spacing, BorderRadius } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import { ChipSelect } from '@/components/ChipSelect';
 import { ResultCard, ResultCardData } from '@/components/ResultCard';
-import { GEMSTONE_DATABASE } from '@/constants/gemstoneData';
+import { GEMSTONE_DATABASE, Gemstone } from '@/constants/gemstoneData';
+import { getAllGemstones } from '@/services/gemstoneService';
 import { logGemMeasurement } from '@/services/supabaseClient';
 import { saveIdentificationHistory } from '@/services/identificationService';
 import { geminiService, IdentificationQuestion, IdentificationResult } from '@/services/geminiService';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image as ExpoImage } from 'expo-image';
+import IdentificationResultSheet, { AlternativeMatch } from '@/components/IdentificationResultSheet';
 
 type ColorOption = 'Red' | 'Blue' | 'Green' | 'Yellow' | 'Pink' | 'Purple' | 'Brown' | 'Black' | 'Colorless' | 'Multicolor';
-type Transparency = 'Transparent' | 'Translucent' | 'Opaque';
 type StoneType = 'Ruby' | 'Sapphire' | 'Emerald' | 'Topaz' | 'Garnet' | 'Zircon' | 'Other' | 'Not sure';
 
 export default function IdentificationLabScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const navigation = useNavigation<any>();
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [selectedColors, setSelectedColors] = useState<ColorOption[]>([]);
-  const [transparency, setTransparency] = useState<Transparency>('Transparent');
   const [stoneGuess, setStoneGuess] = useState<StoneType>('Not sure');
   const [riValue, setRiValue] = useState('');
   const [sgValue, setSgValue] = useState('');
+  const [hardnessMin, setHardnessMin] = useState('');
+  const [hardnessMax, setHardnessMax] = useState('');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<ResultCardData | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
+  const [otherMatches, setOtherMatches] = useState<AlternativeMatch[]>([]);
   
   // AI States
   const [aiQuestions, setAiQuestions] = useState<IdentificationQuestion[]>([]);
@@ -76,6 +79,122 @@ export default function IdentificationLabScreen() {
     'B': 0.8, // 20% less
     'C': 0.6, // 40% less
     'D': 0.4, // 60% less
+  };
+
+  const buildBreakdownFromGem = (gem: any, score: number): ResultCardData => {
+    const ri = parseFloat(riValue);
+    const sg = parseFloat(sgValue);
+
+    const normalizePolariscopeReaction = (value: any): string => {
+      if (value === null || value === undefined) return "";
+      const str = String(value);
+      // Extract tokens from within parentheses first (e.g., "(SR)" -> " sr ")
+      const withParenthesesKept = str.replace(/\(([^)]*)\)/g, ' $1 ');
+      return withParenthesesKept
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    const reaction = normalizePolariscopeReaction((gem as any).polariscopeReaction);
+    const optic = normalizePolariscopeReaction(gem.opticCharacter);
+    const hasToken = (haystack: string, token: string) => {
+      if (!haystack) return false;
+      return (` ${haystack} `).includes(` ${token} `) || haystack.includes(token);
+    };
+
+    const hardnessMinValue = parseFloat(hardnessMin);
+    const hardnessMaxValue = parseFloat(hardnessMax);
+    const gemHardness = typeof gem.hardness === "string" ? parseFloat(gem.hardness) : gem.hardness;
+
+    const matchesHardnessRange =
+      !Number.isNaN(gemHardness) &&
+      !Number.isNaN(hardnessMinValue) &&
+      !Number.isNaN(hardnessMaxValue) &&
+      hardnessMinValue <= gemHardness &&
+      hardnessMaxValue >= gemHardness;
+
+    const userHardnessSingle = !Number.isNaN(hardnessMinValue) ? hardnessMinValue : !Number.isNaN(hardnessMaxValue) ? hardnessMaxValue : NaN;
+    const matchesHardnessSingle =
+      !Number.isNaN(gemHardness) &&
+      !Number.isNaN(userHardnessSingle) &&
+      Math.abs(userHardnessSingle - gemHardness) <= 0.3;
+
+    const userPolariscope = polariscope && polariscope !== "All" ? polariscope : null;
+    const matchesPolariscope =
+      userPolariscope === "SR"
+        ? hasToken(reaction, "sr") || hasToken(reaction, "single") || hasToken(optic, "single") ||
+          // Treat NA/empty optic + NONE pleochroism as likely singly refractive (e.g., Garnet)
+          ((reaction === '' || reaction === 'na' || reaction === 'n a') && 
+           (optic === '' || optic === 'na' || optic === 'n a') &&
+           String(gem.pleochroism || '').toUpperCase() === 'NONE')
+        : userPolariscope === "DR"
+          ? hasToken(reaction, "dr") || hasToken(reaction, "double") || hasToken(optic, "double")
+          : userPolariscope === "ADR"
+            ? hasToken(reaction, "adr") || hasToken(reaction, "anisotropic") || hasToken(optic, "anisotropic")
+            : userPolariscope === "AGG"
+              ? hasToken(reaction, "agg") || hasToken(reaction, "aggregate") || hasToken(optic, "aggregate")
+              : false;
+
+    const rawPolariscopeValue = String((gem as any).polariscopeReaction || '').trim();
+    const rawOpticValue = String(gem.opticCharacter || '').trim();
+    const normalizedRawPolariscope = normalizePolariscopeReaction(rawPolariscopeValue);
+    const normalizedRawOptic = normalizePolariscopeReaction(rawOpticValue);
+    const hasMeaningfulPolariscopeData =
+      (normalizedRawPolariscope.length > 0 && normalizedRawPolariscope !== 'na' && normalizedRawPolariscope !== 'n a') ||
+      (normalizedRawOptic.length > 0 && normalizedRawOptic !== 'na' && normalizedRawOptic !== 'n a');
+
+    return {
+      stoneName: gem.variety,
+      confidence: `${Math.round(score)}%`,
+      shortReasoning: {
+        matchRI: !isNaN(ri) ? `RI ${riValue} ${ri >= gem.riMin && ri <= gem.riMax ? 'matches' : 'close to'} ${gem.riMin}–${gem.riMax}` : '',
+        matchSG: !isNaN(sg) ? `SG ${sgValue} ${sg >= gem.sgMin && sg <= gem.sgMax ? 'matches' : 'close to'} ${gem.sgMin}–${gem.sgMax}` : '',
+        matchColor: selectedColors.length ? `${selectedColors.join(', ')} ${selectedColors.some(color => (gem.colors||[]).some((gc: string) => gc.toLowerCase().includes(color.toLowerCase()) || color.toLowerCase().includes(gc.toLowerCase()))) ? 'matches' : 'partially matches'} ${gem.variety}` : '',
+        matchClarity: '',
+        matchPolariscope: (userPolariscope && hasMeaningfulPolariscopeData)
+          ? `Polariscope ${userPolariscope} ${matchesPolariscope ? 'matches' : 'does not match'} ${rawPolariscopeValue || rawOpticValue}`
+          : '',
+        matchHardness: (!Number.isNaN(hardnessMinValue) || !Number.isNaN(hardnessMaxValue))
+          ? (!Number.isNaN(hardnessMinValue) && !Number.isNaN(hardnessMaxValue)
+            ? `Hardness ${hardnessMinValue}–${hardnessMaxValue} ${matchesHardnessRange ? 'matches' : 'does not match'} ${gem.hardness}`
+            : `Hardness ${userHardnessSingle} ${matchesHardnessSingle ? 'matches' : 'close to'} ${gem.hardness}`)
+          : '',
+        matchPleochroism: pleochroism ? `Pleochroism ${pleochroism} ${pleochroism === 'Present' ? (gem.pleochroism !== 'NONE' ? 'matches' : 'does not match') : (gem.pleochroism === 'NONE' ? 'matches' : 'does not match')} ${gem.pleochroism}` : '',
+        matchInclusions: inclusions.length > 0 ? `Inclusions ${inclusions.join(', ')} ${(gem.inclusions || []).some((gInc: string) => inclusions.some((inc) => gInc.toLowerCase().includes(inc.toLowerCase()) || inc.toLowerCase().includes(gInc.toLowerCase()))) ? 'match' : 'do not match'}` : '',
+        matchOpticalCharacter: (opticalCharacter && opticalCharacter !== 'All') ? `Optical Character ${opticalCharacter} ${(gem.opticCharacter || '').toLowerCase().includes(opticalCharacter.toLowerCase()) ? 'matches' : 'does not match'} ${gem.opticCharacter}` : '',
+      },
+      otherPossibleStones: [],
+      gemData: {
+        variety: gem.variety,
+        chemicalComposition: gem.chemicalComposition || '',
+        crystalSystem: gem.crystalSystem || '',
+        colorRange: (gem.colors || []).join(', '),
+        causeOfColor: gem.causeOfColor || '',
+        transparency: Array.isArray(gem.transparency) ? gem.transparency.join(', ') : (gem.transparency || ''),
+        luster: gem.luster || '',
+        hardness: (gem.hardness ?? '').toString(),
+        specificGravity: `${gem.sgMin}–${gem.sgMax}`,
+        refractiveIndex: `${gem.riMin}–${gem.riMax}`,
+        cleavage: gem.cleavage || '',
+        fracture: gem.fracture || '',
+        opticCharacter: gem.opticCharacter || '',
+        pleochroism: gem.pleochroism || '',
+        typicalInclusions: (gem.inclusions || []).join(', '),
+        uvReaction: gem.uvResponse || '',
+        simulants: (gem.simulants || []).join(', '),
+        commonTreatments: (gem.treatments || []).join(', '),
+        occurrences: (gem.occurrences || []).join(', '),
+        indianTradeName: gem.indianName || '',
+        imageUrl: gem.image || null,
+        inclusionImages: gem.inclusionImages || []
+      },
+      actionButtons: {
+        saveToInventory: true,
+        createCertificate: true
+      }
+    };
   };
 
   // Real gemstone-specific optical tests using actual database data
@@ -193,15 +312,14 @@ export default function IdentificationLabScreen() {
   // Optical properties for quick identification modal
   const [isDR, setIsDR] = useState<boolean | null>(null); // Double Refractive
   const [hasPleochroism, setHasPleochroism] = useState<boolean | null>(null);
-  const [hasUVResponse, setHasUVResponse] = useState<boolean | null>(null);
   const [hasInclusions, setHasInclusions] = useState<boolean | null>(null);
 
   // Advanced parameters state
-  const [luster, setLuster] = useState<string[]>([]);
-  const [crystalSystem, setCrystalSystem] = useState<string[]>([]);
   const [pleochroism, setPleochroism] = useState<'Present' | 'Not visible' | 'Not checked' | null>(null);
   const [inclusions, setInclusions] = useState<string[]>([]);
-  const [uvResponse, setUvResponse] = useState<string[]>([]);
+  
+  const [polariscope, setPolariscope] = useState<'All' | 'ADR' | 'AGG' | 'DR' | 'SR'>('All');
+  const [opticalCharacter, setOpticalCharacter] = useState<'All' | 'Biaxial' | 'Uniaxial'>('All');
 
   const toggleColor = (color: ColorOption) => {
     setSelectedColors(prev => {
@@ -216,59 +334,137 @@ export default function IdentificationLabScreen() {
   };
 
   const pickFromGallery = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    if (!res.canceled && res.assets?.length) {
-      setImageUri(res.assets[0].uri);
+    console.log('pickFromGallery called');
+    try {
+      console.log('Starting gallery pick...');
+      
+      // Handle web platform
+      if (Platform.OS === 'web') {
+        console.log('Web platform: using file input');
+        // On web, ImagePicker will automatically use file input
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.7,
+        });
+        console.log('Web gallery result:', result);
+        
+        if (!result.canceled && result.assets && result.assets.length > 0) {
+          const uri = result.assets[0].uri;
+          console.log('Selected image URI:', uri);
+          setImageUri(uri);
+        } else {
+          console.log('User cancelled or no image selected');
+        }
+        return;
+      }
+      
+      // For mobile platforms
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+      });
+      
+      console.log('Gallery result:', result);
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        console.log('Selected image URI:', uri);
+        setImageUri(uri);
+      } else {
+        console.log('User cancelled or no image selected');
+      }
+    } catch (error) {
+      console.error('Gallery error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Error', 'Could not open gallery: ' + errorMessage);
     }
   };
 
   const openCamera = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) return;
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
-    if (!res.canceled && res.assets?.length) {
-      setImageUri(res.assets[0].uri);
+    console.log('openCamera called');
+    try {
+      console.log('Starting camera...');
+      
+      // Try the most basic approach first
+      const result = await ImagePicker.launchCameraAsync({
+        quality: 0.7,
+      });
+      
+      console.log('Camera result:', result);
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const uri = result.assets[0].uri;
+        console.log('Taken photo URI:', uri);
+        setImageUri(uri);
+      } else {
+        console.log('User cancelled or no photo taken');
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Error', 'Could not open camera: ' + errorMessage);
     }
   };
 
-  const handleTakePhoto = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: ['Cancel', 'Open Camera', 'Open Gallery'],
-          cancelButtonIndex: 0,
-        },
-        (buttonIndex) => {
-          if (buttonIndex === 1) openCamera();
-          else if (buttonIndex === 2) pickFromGallery();
-        }
-      );
-    } else {
+  const handleTakePhoto = async () => {
+    console.log('handleTakePhoto called');
+    try {
+      // First, let's test if ImagePicker is available and working
+      console.log('Testing ImagePicker availability...');
+      const pickerStatus = await ImagePicker.getMediaLibraryPermissionsAsync();
+      console.log('Current media library permission status:', pickerStatus);
+      
+      const cameraStatus = await ImagePicker.getCameraPermissionsAsync();
+      console.log('Current camera permission status:', cameraStatus);
+      
+      // Handle web platform differently
+      if (Platform.OS === 'web') {
+        console.log('Running on web platform, using file input...');
+        // On web, ImagePicker uses file input, so we can directly launch gallery
+        await pickFromGallery();
+        return;
+      }
+      
+      // For mobile platforms, show alert dialog
       Alert.alert(
         'Add Photo',
         'Choose a source',
         [
-          { text: 'Open Camera', onPress: openCamera },
-          { text: 'Open Gallery', onPress: pickFromGallery },
+          { 
+            text: 'Open Camera', 
+            onPress: async () => {
+              console.log('Camera option selected');
+              await openCamera();
+            }
+          },
+          { 
+            text: 'Open Gallery', 
+            onPress: async () => {
+              console.log('Gallery option selected');
+              await pickFromGallery();
+            }
+          },
           { text: 'Cancel', style: 'cancel' },
         ],
         { cancelable: true }
       );
+    } catch (error) {
+      console.error('Error in handleTakePhoto:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Error', 'Failed to open photo options: ' + errorMessage);
     }
   };
 
   const handleIdentify = async () => {
-    console.log('Identify button pressed');
-    // Reset optical properties
+    // Reset optical properties states
     setIsDR(null);
     setHasPleochroism(null);
-    setHasUVResponse(null);
     setHasInclusions(null);
     setResult(null);
-    // Open modal to ask optical properties
-    setShowResultModal(true);
+    // Show loading state
+    setIsLoading(true);
+    // Directly perform identification
+    await handleFinalIdentify();
   };
 
   const handleFinalIdentify = async () => {
@@ -276,9 +472,29 @@ export default function IdentificationLabScreen() {
     try {
       const ri = parseFloat(riValue);
       const sg = parseFloat(sgValue);
+      const hardnessMinValue = parseFloat(hardnessMin);
+      const hardnessMaxValue = parseFloat(hardnessMax);
+
+      // Load gemstones from database (public + custom) with fallback to local constants
+      const dbGemstones = await getAllGemstones();
+      const GEM_LIST = (dbGemstones && dbGemstones.length > 0) ? dbGemstones : GEMSTONE_DATABASE;
+
+      // DEBUG: Check if Garnet is in the list
+      const garnetInList = GEM_LIST.find(gem => gem.variety?.toLowerCase().includes('garnet'));
+      console.log('🔍 DEBUG: Garnet in list?', !!garnetInList, 'Total gems:', GEM_LIST.length);
+      if (garnetInList) {
+        console.log('🔍 DEBUG: Garnet data:', {
+          variety: garnetInList.variety,
+          polariscopeReaction: (garnetInList as any).polariscopeReaction,
+          opticCharacter: garnetInList.opticCharacter,
+          pleochroism: garnetInList.pleochroism,
+          riMin: garnetInList.riMin,
+          riMax: garnetInList.riMax
+        });
+      }
 
       // Comprehensive database matching using all parameters
-      const matches = GEMSTONE_DATABASE.map(gem => {
+      const matches = GEM_LIST.map(gem => {
         let score = 0;
         let maxScore = 0;
         const reasons = [];
@@ -317,6 +533,46 @@ export default function IdentificationLabScreen() {
           maxScore += 8;
         }
 
+        // Hardness matching (weighted moderately)
+        if (!isNaN(hardnessMinValue) && !isNaN(hardnessMaxValue)) {
+          maxScore += 15;
+          // Check if user's hardness range overlaps with gem's hardness range
+          const gemHardness = typeof gem.hardness === 'string' ? parseFloat(gem.hardness) : gem.hardness;
+          if (!isNaN(gemHardness)) {
+            // Check if ranges overlap
+            if (hardnessMinValue <= gemHardness && hardnessMaxValue >= gemHardness) {
+              score += 15;
+              reasons.push(`Hardness ${hardnessMinValue}-${hardnessMaxValue} matches ${gem.hardness}`);
+            } else {
+              // Check if close
+              const minDiff = Math.abs(hardnessMinValue - gemHardness);
+              const maxDiff = Math.abs(hardnessMaxValue - gemHardness);
+              const closestDiff = Math.min(minDiff, maxDiff);
+              if (closestDiff <= 0.5) {
+                score += 8;
+                reasons.push(`Hardness ${hardnessMinValue}-${hardnessMaxValue} close to ${gem.hardness}`);
+              }
+            }
+          }
+        } else if (!isNaN(hardnessMinValue) || !isNaN(hardnessMaxValue)) {
+          // Single hardness value provided
+          const hardnessValue = !isNaN(hardnessMinValue) ? hardnessMinValue : hardnessMaxValue;
+          maxScore += 12;
+          const gemHardness = typeof gem.hardness === 'string' ? parseFloat(gem.hardness) : gem.hardness;
+          if (!isNaN(gemHardness)) {
+            const diff = Math.abs(hardnessValue - gemHardness);
+            if (diff <= 0.3) {
+              score += 12;
+              reasons.push(`Hardness ${hardnessValue} matches ${gem.hardness}`);
+            } else if (diff <= 0.7) {
+              score += 6;
+              reasons.push(`Hardness ${hardnessValue} close to ${gem.hardness}`);
+            }
+          }
+        } else {
+          maxScore += 5;
+        }
+
         // Color matching (very important)
         if (selectedColors.length > 0) {
           maxScore += 20;
@@ -336,34 +592,73 @@ export default function IdentificationLabScreen() {
           maxScore += 5;
         }
 
-        // Transparency matching
-        if (transparency) {
+
+        // Polariscope matching
+        if (polariscope && polariscope !== 'All') {
           maxScore += 10;
-          if (gem.transparency.includes(transparency)) {
+          const normalizePolariscopeReaction = (value: any): string => {
+            if (value === null || value === undefined) return '';
+            const str = String(value);
+            // Extract tokens from within parentheses first (e.g., "(SR)" -> " sr ")
+            const withParenthesesKept = str.replace(/\(([^)]*)\)/g, ' $1 ');
+            return withParenthesesKept
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          };
+
+          const reaction = normalizePolariscopeReaction((gem as any).polariscopeReaction);
+          const optic = normalizePolariscopeReaction(gem.opticCharacter);
+
+          const hasToken = (haystack: string, token: string) => {
+            if (!haystack) return false;
+            return (` ${haystack} `).includes(` ${token} `) || haystack.includes(token);
+          };
+
+          const matchesPolariscope =
+            (polariscope === 'SR' && (hasToken(reaction, 'sr') || hasToken(reaction, 'single') || hasToken(optic, 'single') || 
+              // Treat NA/empty optic + NONE pleochroism as likely singly refractive (e.g., Garnet)
+              ((reaction === '' || reaction === 'na' || reaction === 'n a') && 
+               (optic === '' || optic === 'na' || optic === 'n a') &&
+               String(gem.pleochroism || '').toUpperCase() === 'NONE'))) ||
+            (polariscope === 'DR' && (hasToken(reaction, 'dr') || hasToken(reaction, 'double') || hasToken(optic, 'double'))) ||
+            (polariscope === 'ADR' && (hasToken(reaction, 'adr') || hasToken(reaction, 'anisotropic') || hasToken(optic, 'anisotropic'))) ||
+            (polariscope === 'AGG' && (hasToken(reaction, 'agg') || hasToken(reaction, 'aggregate') || hasToken(optic, 'aggregate')));
+
+          // Debug logging for Garnet
+          if (gem.variety?.toLowerCase().includes('garnet')) {
+            console.log('Garnet debug:', {
+              variety: gem.variety,
+              polariscopeReaction: (gem as any).polariscopeReaction,
+              opticCharacter: gem.opticCharacter,
+              pleochroism: gem.pleochroism,
+              normalizedReaction: reaction,
+              normalizedOptic: optic,
+              pleochroismUpper: String(gem.pleochroism || '').toUpperCase(),
+              isNone: String(gem.pleochroism || '').toUpperCase() === 'NONE',
+              reactionEmpty: reaction === '' || reaction === 'na' || reaction === 'n a',
+              opticEmpty: optic === '' || optic === 'na' || optic === 'n a',
+              matchesPolariscope
+            });
+          }
+
+          if (matchesPolariscope) {
             score += 10;
-            reasons.push(`Transparency ${transparency} matches`);
+            reasons.push(`Polariscope ${polariscope} matches`);
           }
         } else {
           maxScore += 3;
         }
 
-        // Luster matching (from advanced parameters)
-        if (luster.length > 0) {
-          maxScore += 10;
-          if (luster.includes(gem.luster)) {
-            score += 10;
-            reasons.push(`Luster ${gem.luster} matches`);
-          }
-        } else {
-          maxScore += 3;
-        }
-
-        // Crystal System matching
-        if (crystalSystem.length > 0) {
+        // Optical Character matching
+        if (opticalCharacter && opticalCharacter !== 'All') {
           maxScore += 8;
-          if (crystalSystem.includes(gem.crystalSystem)) {
+          const gemOpticalChar = gem.opticCharacter.toLowerCase();
+          if ((opticalCharacter === 'Biaxial' && gemOpticalChar.includes('biaxial')) ||
+              (opticalCharacter === 'Uniaxial' && gemOpticalChar.includes('uniaxial'))) {
             score += 8;
-            reasons.push(`Crystal System ${gem.crystalSystem} matches`);
+            reasons.push(`Optical Character ${opticalCharacter} matches`);
           }
         } else {
           maxScore += 2;
@@ -402,17 +697,6 @@ export default function IdentificationLabScreen() {
           maxScore += 3;
         }
 
-        // UV Response matching
-        if (uvResponse.length > 0) {
-          maxScore += 8;
-          if (uvResponse.includes(gem.uvResponse)) {
-            score += 8;
-            reasons.push(`UV Response ${gem.uvResponse} matches`);
-          }
-        } else {
-          maxScore += 2;
-        }
-
         // User guess bonus
         if (stoneGuess !== 'Not sure') {
           maxScore += 5;
@@ -434,8 +718,43 @@ export default function IdentificationLabScreen() {
         };
       }).sort((a, b) => b.score - a.score);
 
+      setOtherMatches(matches);
       const primaryMatch = matches[0];
-      const secondary = matches.slice(1, 4);
+      const getPriorityRank = (gem: any): number => {
+        const variety = String(gem?.variety || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const precious = ["diamond", "ruby", "sapphire", "emerald"];
+        if (precious.some((p) => variety.includes(p))) return 0;
+
+        const popular = [
+          "spinel",
+          "garnet",
+          "tourmaline",
+          "tourmalin",
+          "topaz",
+          "zircon",
+          "opal",
+          "amethyst",
+          "aquamarine",
+          "peridot",
+        ];
+        if (popular.some((p) => variety.includes(p))) return 1;
+
+        return 2;
+      };
+
+      const secondary = matches
+        .slice(1)
+        .sort((a, b) => {
+          const rankDiff = getPriorityRank(a.gem) - getPriorityRank(b.gem);
+          if (rankDiff !== 0) return rankDiff;
+          return b.score - a.score;
+        })
+        .slice(0, 10);
 
       if (!primaryMatch || primaryMatch.score < 20) {
         Alert.alert('Low Confidence', 'Unable to identify with current parameters. Please provide more details.');
@@ -443,50 +762,12 @@ export default function IdentificationLabScreen() {
         return;
       }
 
-      const breakdown = {
-        stoneName: primaryMatch.gem.variety,
-        confidence: `${Math.round(primaryMatch.score)}%`,
-        shortReasoning: {
-          matchRI: !isNaN(ri) ? `RI ${riValue} ${ri >= primaryMatch.gem.riMin && ri <= primaryMatch.gem.riMax ? 'matches' : 'close to'} ${primaryMatch.gem.riMin}–${primaryMatch.gem.riMax}` : '',
-          matchSG: !isNaN(sg) ? `SG ${sgValue} ${sg >= primaryMatch.gem.sgMin && sg <= primaryMatch.gem.sgMax ? 'matches' : 'close to'} ${primaryMatch.gem.sgMin}–${primaryMatch.gem.sgMax}` : '',
-          matchColor: selectedColors.length ? `${selectedColors.join(', ')} ${selectedColors.some(color => primaryMatch.gem.colors.some(gemColor => 
-            gemColor.toLowerCase().includes(color.toLowerCase()) || 
-            color.toLowerCase().includes(gemColor.toLowerCase())
-          )) ? 'matches' : 'partially matches'} ${primaryMatch.gem.variety}` : '',
-          matchClarity: transparency ? `${transparency} transparency ${primaryMatch.gem.transparency.includes(transparency) ? 'matches' : 'not typical for'} ${primaryMatch.gem.variety}` : '',
-        },
-        otherPossibleStones: secondary.map(s => ({
-          name: s.gem.variety,
-          confidence: `${Math.max(5, Math.min(100, s.score))}%`,
-          reasons: s.reasons
-        })),
-        gemData: {
-          variety: primaryMatch.gem.variety,
-          chemicalComposition: primaryMatch.gem.chemicalComposition,
-          crystalSystem: primaryMatch.gem.crystalSystem,
-          colorRange: primaryMatch.gem.colors.join(', '),
-          causeOfColor: primaryMatch.gem.causeOfColor,
-          transparency: primaryMatch.gem.transparency.join(', '),
-          luster: primaryMatch.gem.luster,
-          hardness: primaryMatch.gem.hardness.toString(),
-          specificGravity: `${primaryMatch.gem.sgMin}–${primaryMatch.gem.sgMax}`,
-          refractiveIndex: `${primaryMatch.gem.riMin}–${primaryMatch.gem.riMax}`,
-          cleavage: primaryMatch.gem.cleavage,
-          fracture: primaryMatch.gem.fracture,
-          opticCharacter: primaryMatch.gem.opticCharacter,
-          pleochroism: primaryMatch.gem.pleochroism,
-          typicalInclusions: primaryMatch.gem.inclusions.join(', '),
-          uvReaction: primaryMatch.gem.uvResponse,
-          simulants: primaryMatch.gem.simulants.join(', '),
-          commonTreatments: primaryMatch.gem.treatments.join(', '),
-          occurrences: primaryMatch.gem.occurrences.join(', '),
-          indianTradeName: primaryMatch.gem.indianName,
-        },
-        actionButtons: {
-          saveToInventory: true,
-          createCertificate: true,
-        },
-      };
+      const breakdown = buildBreakdownFromGem(primaryMatch.gem, primaryMatch.score);
+
+      breakdown.otherPossibleStones = secondary.map(s => ({
+        name: s.gem.variety,
+        confidence: `${Math.max(5, Math.min(100, s.score))}%`
+      }));
 
       console.log('Setting result:', JSON.stringify(breakdown, null, 2));
       setResult(breakdown);
@@ -511,15 +792,11 @@ export default function IdentificationLabScreen() {
         await logGemMeasurement({
           image_url: imageUri,
           colors: selectedColors,
-          transparency,
           ri: riValue || null,
           sg: sgValue || null,
           stone_guess: stoneGuess,
-          luster,
-          crystal_system: crystalSystem,
-          pleochroism,
-          inclusions,
-          uv_response: uvResponse,
+          pleochroism: pleochroism || null,
+          inclusions: inclusions,
         });
       } catch (error) {
         console.log('Error logging measurement:', error);
@@ -542,10 +819,34 @@ export default function IdentificationLabScreen() {
 
     setIsAnalyzingImage(true);
     try {
-      // Convert image to base64
-      const base64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: 'base64',
-      });
+      let base64: string;
+      
+      // Handle web platform differently
+      if (Platform.OS === 'web') {
+        console.log('Web platform: using fetch to read image');
+        // On web, use fetch to read the image as base64
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            // Remove data URL prefix to get just the base64
+            const base64Data = result.split(',')[1];
+            resolve(base64Data);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } else {
+        console.log('Mobile platform: using FileSystem');
+        // On mobile, use FileSystem
+        base64 = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: 'base64',
+        });
+      }
+
+      console.log('Image converted to base64, length:', base64.length);
 
       // Analyze with Gemini
       const analysis = await geminiService.analyzeGemstoneImage(base64);
@@ -557,9 +858,9 @@ export default function IdentificationLabScreen() {
         visualProperties: analysis.suggestedProperties,
         manual: {
           colors: selectedColors,
-          transparency,
           ri: riValue,
-          sg: sgValue
+          sg: sgValue,
+          hardness: hardnessMin || hardnessMax ? `${hardnessMin || ''}-${hardnessMax || ''}` : null
         }
       };
 
@@ -568,12 +869,14 @@ export default function IdentificationLabScreen() {
       setShowAIQuestions(true);
     } catch (error) {
       console.error('Error analyzing image:', error);
-      Alert.alert('Error', 'Failed to analyze image. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      Alert.alert('Error', 'Failed to analyze image: ' + errorMessage);
     } finally {
       setIsAnalyzingImage(false);
     }
   };
 
+// ...
   const handleAIAnswer = (questionId: string, answer: any) => {
     setAiAnswers(prev => ({
       ...prev,
@@ -594,9 +897,30 @@ export default function IdentificationLabScreen() {
     try {
       let imageBase64 = '';
       if (imageUri) {
-        imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
-          encoding: 'base64',
-        });
+        // Handle web platform differently
+        if (Platform.OS === 'web') {
+          console.log('Web platform: using fetch to read image in identifyWithAI');
+          // On web, use fetch to read the image as base64
+          const response = await fetch(imageUri);
+          const blob = await response.blob();
+          imageBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              // Remove data URL prefix to get just the base64
+              const base64Data = result.split(',')[1];
+              resolve(base64Data);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          console.log('Mobile platform: using FileSystem in identifyWithAI');
+          // On mobile, use FileSystem
+          imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+            encoding: 'base64',
+          });
+        }
       }
 
       const observations = {
@@ -604,10 +928,9 @@ export default function IdentificationLabScreen() {
         visualProperties: imageAnalysis?.suggestedProperties || {},
         manual: {
           colors: selectedColors,
-          transparency,
           ri: riValue,
           sg: sgValue,
-          hardness: null, // Could add hardness input
+          hardness: hardnessMin || hardnessMax ? `${hardnessMin || ''}-${hardnessMax || ''}` : null
         }
       };
 
@@ -685,6 +1008,46 @@ export default function IdentificationLabScreen() {
     setAiResult(null);
   };
 
+  // Handler functions for IdentificationResultSheet
+  const handleCloseResultSheet = () => {
+    setShowResultModal(false);
+  };
+
+  const handleSelectAlternative = (match: AlternativeMatch) => {
+    const breakdown = buildBreakdownFromGem(match.gem, match.score);
+    setResult(breakdown);
+    // Update otherMatches to show the selected as primary and others as alternatives
+    const newOtherMatches = otherMatches.filter(m => m !== match);
+    setOtherMatches([match, ...newOtherMatches]);
+  };
+
+  const handleResetIdentification = () => {
+    setShowResultModal(false);
+    setResult(null);
+    setOtherMatches([]);
+    setSelectedColors([]);
+    setStoneGuess('Not sure');
+    setRiValue('');
+    setSgValue('');
+    setHardnessMin('');
+    setHardnessMax('');
+    setImageUri(null);
+    setIsDR(null);
+    setHasPleochroism(null);
+    setHasInclusions(null);
+    resetAI();
+  };
+
+  const handleSaveToInventory = () => {
+    Alert.alert('Saved to Inventory', 'Your identification has been saved.');
+    setShowResultModal(false);
+  };
+
+  const handleCreateCertificate = () => {
+    navigation.getParent()?.navigate('CertificateTab');
+    setShowResultModal(false);
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
       <ScrollView 
@@ -716,24 +1079,26 @@ export default function IdentificationLabScreen() {
           </View>
         </View>
 
-        {/* Quick Identification Card */}
+        {/* Identification Card */}
         <Card elevation={2} variant="elevated" style={styles.card}>
           <View style={styles.cardHeader}>
-          <ThemedText type="h3" style={styles.cardTitle}>Quick Identification</ThemedText>
+          <ThemedText type="h3" style={styles.cardTitle}>Gemstone Identification</ThemedText>
             <ThemedText type="body" style={[styles.cardSubtitle, { color: theme.textSecondary }]}>
-            Just add a photo and a couple of details. The rest is automatic.
+            Add photo and select properties for accurate identification
           </ThemedText>
           </View>
 
           {/* Photo Input */}
-          <TouchableOpacity 
+          <Pressable 
             style={[
               styles.photoInput, 
               !imageUri && styles.photoInputEmpty,
               { borderColor: theme.border, backgroundColor: theme.backgroundSecondary }
             ]}
-            onPress={handleTakePhoto}
-            activeOpacity={0.8}
+            onPress={() => {
+              console.log('Photo input Pressable pressed');
+              handleTakePhoto();
+            }}
           >
             {imageUri ? (
               <>
@@ -779,51 +1144,13 @@ export default function IdentificationLabScreen() {
                   <Feather name="camera" size={40} color={theme.primary} />
                 </View>
                 <ThemedText style={[styles.photoPlaceholderText, { color: theme.text, fontWeight: '600' }]}>Add Stone Photo</ThemedText>
-                <ThemedText style={[styles.photoPlaceholderSubtext, { color: theme.textSecondary }]}>Tap to take photo or choose from gallery</ThemedText>
               </View>
             )}
-          </TouchableOpacity>
+          </Pressable>
 
-          {/* Stone Type Guess */}
+          {/* Colors */}
           <View style={styles.section}>
-            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>DO YOU HAVE A GUESS?</ThemedText>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipsContainer}
-            >
-              {['Ruby', 'Sapphire', 'Emerald', 'Topaz', 'Garnet', 'Zircon', 'Other', 'Not sure'].map(type => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.chip,
-                    { 
-                      backgroundColor: stoneGuess === type ? theme.primary : theme.backgroundSecondary,
-                      borderColor: stoneGuess === type ? theme.primary : theme.border,
-                    }
-                  ]}
-                  onPress={() => setStoneGuess(type as StoneType)}
-                  activeOpacity={0.7}
-                >
-                  <ThemedText 
-                    style={[
-                      styles.chipText,
-                      { 
-                        color: stoneGuess === type ? theme.buttonText : theme.text,
-                        fontWeight: stoneGuess === type ? '600' : '500',
-                      }
-                    ]}
-                  >
-                    {type}
-                  </ThemedText>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Color Selector */}
-          <View style={styles.section}>
-            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>COLOR</ThemedText>
+            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>COLORS</ThemedText>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
@@ -871,42 +1198,6 @@ export default function IdentificationLabScreen() {
             </ScrollView>
           </View>
 
-          {/* Transparency */}
-          <View style={styles.section}>
-            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>TRANSPARENCY</ThemedText>
-            <View style={styles.row}>
-              {(['Transparent', 'Translucent', 'Opaque'] as const).map(option => {
-                const isSelected = transparency === option;
-                return (
-                <TouchableOpacity
-                  key={option}
-                  style={[
-                    styles.segmentedButton,
-                      { 
-                        backgroundColor: isSelected ? theme.primary : theme.backgroundSecondary,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      }
-                  ]}
-                  onPress={() => setTransparency(option)}
-                    activeOpacity={0.7}
-                >
-                  <ThemedText 
-                    style={[
-                      styles.segmentedButtonText,
-                        { 
-                          color: isSelected ? theme.buttonText : theme.text,
-                          fontWeight: isSelected ? '500' : '400',
-                        }
-                    ]}
-                  >
-                    {option}
-                  </ThemedText>
-                </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-
           {/* RI & SG Inputs */}
           <View style={styles.section}>
             <ThemedText style={styles.label}>Measurements (optional)</ThemedText>
@@ -930,9 +1221,161 @@ export default function IdentificationLabScreen() {
                 />
               </View>
             </View>
+            
+            {/* Hardness Row */}
+            <View style={styles.measurementRow}>
+              <View style={styles.measurementInputContainer}>
+                <ThemedText style={styles.measurementLabel}>Hardness Min</ThemedText>
+                <Input
+                  placeholder="e.g. 7.0"
+                  value={hardnessMin}
+                  onChangeText={setHardnessMin}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.measurementInputContainer}>
+                <ThemedText style={styles.measurementLabel}>Hardness Max</ThemedText>
+                <Input
+                  placeholder="e.g. 7.5"
+                  value={hardnessMax}
+                  onChangeText={setHardnessMax}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
             <ThemedText style={styles.hintText}>
               Skip if you don\u2019t know.
             </ThemedText>
+          </View>
+
+          {/* Optical Properties */}
+          <View style={styles.section}>
+            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>OPTICAL PROPERTIES</ThemedText>
+            
+            
+            <View style={{ height: Spacing.sm }}></View>
+            
+            {/* Polariscope */}
+            <View style={{ marginBottom: Spacing.md }}>
+              <ThemedText style={[styles.fieldLabel, { color: theme.text }]}>Polariscope</ThemedText>
+              <View style={styles.row}>
+                {(['All', 'ADR', 'AGG', 'DR', 'SR'] as const).map(option => {
+                  const isSelected = polariscope === option;
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={[
+                        styles.segmentedButton, 
+                        { 
+                          backgroundColor: isSelected ? theme.primary : theme.backgroundSecondary,
+                          borderColor: isSelected ? theme.primary : theme.border,
+                        }
+                      ]}
+                      onPress={() => setPolariscope(option)}
+                      activeOpacity={0.7}
+                    >
+                      <ThemedText style={[
+                        styles.segmentedButtonText, 
+                        { 
+                          color: isSelected ? theme.buttonText : theme.text,
+                          fontWeight: isSelected ? '600' : '500',
+                        }
+                      ]}>
+                        {option}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+            
+            <View style={{ height: Spacing.sm }}></View>
+            
+            {/* Optical Character */}
+            <View style={{ marginBottom: Spacing.md }}>
+              <ThemedText style={[styles.fieldLabel, { color: theme.text }]}>Optical Character</ThemedText>
+              <View style={styles.row}>
+                {(['All', 'Biaxial', 'Uniaxial'] as const).map(option => {
+                  const isSelected = opticalCharacter === option;
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={[
+                        styles.segmentedButton, 
+                        { 
+                          backgroundColor: isSelected ? theme.primary : theme.backgroundSecondary,
+                          borderColor: isSelected ? theme.primary : theme.border,
+                        }
+                      ]}
+                      onPress={() => setOpticalCharacter(option)}
+                      activeOpacity={0.7}
+                    >
+                      <ThemedText style={[
+                        styles.segmentedButtonText, 
+                        { 
+                          color: isSelected ? theme.buttonText : theme.text,
+                          fontWeight: isSelected ? '600' : '500',
+                        }
+                      ]}>
+                        {option}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+
+          {/* Additional Properties */}
+          <View style={styles.section}>
+            <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>ADDITIONAL PROPERTIES</ThemedText>
+            
+            {/* Pleochroism */}
+            <View style={{ marginBottom: Spacing.md }}>
+              <ThemedText style={[styles.fieldLabel, { color: theme.text }]}>Pleochroism</ThemedText>
+              <View style={styles.row}>
+                {(['Present','Not visible','Not checked'] as const).map(option => {
+                  const isSelected = pleochroism === option;
+                  return (
+                  <TouchableOpacity
+                    key={option}
+                      style={[
+                        styles.segmentedButton, 
+                        { 
+                          backgroundColor: isSelected ? theme.primary : theme.backgroundSecondary,
+                          borderColor: isSelected ? theme.primary : theme.border,
+                        }
+                      ]}
+                    onPress={() => setPleochroism(option)}
+                      activeOpacity={0.7}
+                    >
+                      <ThemedText style={[
+                        styles.segmentedButtonText, 
+                        { 
+                          color: isSelected ? theme.buttonText : theme.text,
+                          fontWeight: isSelected ? '600' : '500',
+                        }
+                      ]}>
+                        {option}
+                      </ThemedText>
+                  </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+            
+            <View style={{ height: Spacing.sm }}></View>
+            
+            {/* Inclusions */}
+            <ChipSelect 
+              label="Inclusions"
+              options={["Needles","Silk","Fingerprints","Crystals","Feathers","Color zoning","Bubbles","None visible"]}
+              selected={inclusions}
+              onSelect={(vals) => setInclusions(vals)}
+              multi
+            />
+            
+            <View style={{ height: Spacing.lg }}></View>
           </View>
 
           {/* Identify Button */}
@@ -985,426 +1428,20 @@ export default function IdentificationLabScreen() {
           </ThemedText>
         </Card>
 
-        {/* Advanced Parameters Card */}
-        <Card elevation={2} variant="elevated" style={styles.card}>
-          <TouchableOpacity 
-            style={styles.advancedHeader}
-            onPress={() => setIsAdvancedOpen(!isAdvancedOpen)}
-            activeOpacity={0.7}
-          >
-            <ThemedText type="h3">Advanced Parameters</ThemedText>
-            <Feather 
-              name={isAdvancedOpen ? 'chevron-up' : 'chevron-down'} 
-              size={24} 
-              color={theme.text} 
-            />
-          </TouchableOpacity>
-
-          {isAdvancedOpen && (
-            <View style={[styles.advancedContent, { borderTopColor: theme.border }]}>
-              <ChipSelect 
-                label="Luster"
-                options={["Vitreous","Resinous","Greasy","Adamantine","Waxy","Dull"]}
-                selected={luster}
-                onSelect={(vals) => setLuster(vals)}
-                multi
-              />
-              <View style={{ height: Spacing.lg }} />
-              <ChipSelect 
-                label="Crystal System"
-                options={["Cubic","Trigonal","Hexagonal","Orthorhombic","Monoclinic","Triclinic","Amorphous"]}
-                selected={crystalSystem}
-                onSelect={(vals) => setCrystalSystem(vals)}
-                multi
-              />
-              <View style={{ height: Spacing.lg }} />
-              <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>PLEOCHROISM</ThemedText>
-              <View style={styles.row}>
-                {(['Present','Not visible','Not checked'] as const).map(option => {
-                  const isSelected = pleochroism === option;
-                  return (
-                  <TouchableOpacity
-                    key={option}
-                      style={[
-                        styles.segmentedButton, 
-                        { 
-                          backgroundColor: isSelected ? theme.primary : theme.backgroundSecondary,
-                          borderColor: isSelected ? theme.primary : theme.border,
-                        }
-                      ]}
-                    onPress={() => setPleochroism(option)}
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText style={[
-                        styles.segmentedButtonText, 
-                        { 
-                          color: isSelected ? theme.buttonText : theme.text,
-                          fontWeight: isSelected ? '600' : '500',
-                        }
-                      ]}>
-                        {option}
-                      </ThemedText>
-                  </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <View style={{ height: Spacing.lg }} />
-              <ChipSelect 
-                label="Inclusions"
-                options={["Needles","Silk","Fingerprints","Crystals","Feathers","Color zoning","Bubbles","None visible"]}
-                selected={inclusions}
-                onSelect={(vals) => setInclusions(vals)}
-                multi
-              />
-              <View style={{ height: Spacing.lg }} />
-              <ChipSelect 
-                label="UV Reaction"
-                options={["Inert","Weak","Strong","Red glow","Blue glow","Yellow/Orange","Not tested"]}
-                selected={uvResponse}
-                onSelect={(vals) => setUvResponse(vals)}
-                multi
-              />
-            </View>
-          )}
-        </Card>
-
       </ScrollView>
 
-      {/* Result Modal with Optical Properties */}
-      <Modal
+      <IdentificationResultSheet
         visible={showResultModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowResultModal(false)}
-      >
-        <SafeAreaView style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}>
-          <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-            <ThemedText type="h3">Quick Optical Properties</ThemedText>
-            <TouchableOpacity
-              onPress={() => setShowResultModal(false)}
-              style={[styles.closeButton, { backgroundColor: theme.backgroundSecondary }]}
-            >
-              <Feather name="x" size={24} color={theme.text} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView 
-            style={styles.modalScrollView}
-            contentContainerStyle={styles.modalContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {!result ? (
-              <>
-                <ThemedText type="body" style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
-                  Answer a few quick questions to refine the identification
-                </ThemedText>
-
-                {/* Optical Properties Questions */}
-                <View style={styles.questionsContainer}>
-                  {/* DR Question */}
-                  <Card style={styles.questionCard}>
-                    <ThemedText type="h4" style={styles.questionTitle}>Is it Double Refractive (DR)?</ThemedText>
-                    <ThemedText type="small" style={[styles.questionHint, { color: theme.textSecondary }]}>
-                      Check if you see doubling of facet edges
-                    </ThemedText>
-                    <View style={styles.trueFalseRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: isDR === true ? theme.success : theme.backgroundSecondary,
-                            borderColor: isDR === true ? theme.success : theme.border,
-                          }
-                        ]}
-                        onPress={() => setIsDR(true)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: isDR === true ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Yes
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: isDR === false ? theme.danger : theme.backgroundSecondary,
-                            borderColor: isDR === false ? theme.danger : theme.border,
-                          }
-                        ]}
-                        onPress={() => setIsDR(false)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: isDR === false ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          No
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: isDR === null ? theme.primary : theme.backgroundSecondary,
-                            borderColor: isDR === null ? theme.primary : theme.border,
-                          }
-                        ]}
-                        onPress={() => setIsDR(null)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: isDR === null ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Skip
-                        </ThemedText>
-                      </TouchableOpacity>
-                    </View>
-                  </Card>
-
-                  {/* Pleochroism Question */}
-                  <Card style={styles.questionCard}>
-                    <ThemedText type="h4" style={styles.questionTitle}>Does it show Pleochroism?</ThemedText>
-                    <ThemedText type="small" style={[styles.questionHint, { color: theme.textSecondary }]}>
-                      Different colors when viewed from different angles
-                    </ThemedText>
-                    <View style={styles.trueFalseRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasPleochroism === true ? theme.success : theme.backgroundSecondary,
-                            borderColor: hasPleochroism === true ? theme.success : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasPleochroism(true)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasPleochroism === true ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Yes
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasPleochroism === false ? theme.danger : theme.backgroundSecondary,
-                            borderColor: hasPleochroism === false ? theme.danger : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasPleochroism(false)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasPleochroism === false ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          No
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasPleochroism === null ? theme.primary : theme.backgroundSecondary,
-                            borderColor: hasPleochroism === null ? theme.primary : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasPleochroism(null)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasPleochroism === null ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Skip
-                        </ThemedText>
-                      </TouchableOpacity>
-                    </View>
-                  </Card>
-
-                  {/* UV Response Question */}
-                  <Card style={styles.questionCard}>
-                    <ThemedText type="h4" style={styles.questionTitle}>Does it react to UV light?</ThemedText>
-                    <ThemedText type="small" style={[styles.questionHint, { color: theme.textSecondary }]}>
-                      Shows fluorescence or glow under UV
-                    </ThemedText>
-                    <View style={styles.trueFalseRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasUVResponse === true ? theme.success : theme.backgroundSecondary,
-                            borderColor: hasUVResponse === true ? theme.success : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasUVResponse(true)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasUVResponse === true ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Yes
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasUVResponse === false ? theme.danger : theme.backgroundSecondary,
-                            borderColor: hasUVResponse === false ? theme.danger : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasUVResponse(false)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasUVResponse === false ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          No
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasUVResponse === null ? theme.primary : theme.backgroundSecondary,
-                            borderColor: hasUVResponse === null ? theme.primary : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasUVResponse(null)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasUVResponse === null ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Skip
-                        </ThemedText>
-                      </TouchableOpacity>
-                    </View>
-                  </Card>
-
-                  {/* Inclusions Question */}
-                  <Card style={styles.questionCard}>
-                    <ThemedText type="h4" style={styles.questionTitle}>Does it have visible inclusions?</ThemedText>
-                    <ThemedText type="small" style={[styles.questionHint, { color: theme.textSecondary }]}>
-                      Internal features visible under magnification
-                    </ThemedText>
-                    <View style={styles.trueFalseRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasInclusions === true ? theme.success : theme.backgroundSecondary,
-                            borderColor: hasInclusions === true ? theme.success : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasInclusions(true)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasInclusions === true ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Yes
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasInclusions === false ? theme.danger : theme.backgroundSecondary,
-                            borderColor: hasInclusions === false ? theme.danger : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasInclusions(false)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasInclusions === false ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          No
-                        </ThemedText>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.trueFalseButton,
-                          { 
-                            backgroundColor: hasInclusions === null ? theme.primary : theme.backgroundSecondary,
-                            borderColor: hasInclusions === null ? theme.primary : theme.border,
-                          }
-                        ]}
-                        onPress={() => setHasInclusions(null)}
-                      >
-                        <ThemedText style={[
-                          styles.trueFalseText,
-                          { color: hasInclusions === null ? '#FFFFFF' : theme.text, fontWeight: '600' }
-                        ]}>
-                          Skip
-                        </ThemedText>
-                      </TouchableOpacity>
-                    </View>
-                  </Card>
-                </View>
-
-                {/* Identify Button */}
-                <Button
-                  onPress={handleFinalIdentify}
-                  variant="primary"
-                  size="lg"
-                  disabled={isLoading}
-                  style={styles.modalIdentifyButton}
-                >
-                  {isLoading ? 'Identifying…' : 'Get Result'}
-                </Button>
-                {isLoading && (
-                  <View style={{ alignItems: 'center', marginTop: Spacing.md }}>
-                    <ActivityIndicator size="small" color={theme.primary} />
-                  </View>
-                )}
-              </>
-            ) : (
-              <View style={styles.resultContainer}>
-          <ResultCard
-            breakdown={result}
-                  onSaveToInventory={() => {
-                    Alert.alert('Saved to Inventory', 'Your identification has been saved.');
-                    setShowResultModal(false);
-                  }}
-                  onCreateCertificate={() => {
-                    navigation.getParent()?.navigate('CertificateTab');
-                    setShowResultModal(false);
-                  }}
-                />
-                
-                {/* Buying Guide Button */}
-                <Button
-                  onPress={() => setShowBuyingGuide(true)}
-                  style={[styles.buyingGuideButton, { backgroundColor: theme.success, marginTop: Spacing.md }]}
-                >
-                  <Feather name="shopping-cart" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
-                  <ThemedText style={{ color: '#FFFFFF', fontWeight: '700' }}>
-                    Buying Guide & Pricing
-                  </ThemedText>
-                </Button>
-                
-                <Button
-                  onPress={() => {
-                    setResult(null);
-                    setIsDR(null);
-                    setHasPleochroism(null);
-                    setHasUVResponse(null);
-                    setHasInclusions(null);
-                  }}
-                  variant="outline"
-                  style={styles.resetButton}
-                >
-                  Identify Another Stone
-                </Button>
-              </View>
-            )}
-      </ScrollView>
-        </SafeAreaView>
-      </Modal>
+        isLoading={isLoading}
+        result={result}
+        otherMatches={otherMatches.filter((_, index) => index !== 0)}
+        onClose={handleCloseResultSheet}
+        onSelectAlternative={handleSelectAlternative}
+        onReset={handleResetIdentification}
+        onSaveToInventory={handleSaveToInventory}
+        onCreateCertificate={handleCreateCertificate}
+        onOpenBuyingGuide={() => setShowBuyingGuide(true)}
+      />
 
       {/* AI Questions Modal */}
       <Modal
@@ -1425,7 +1462,7 @@ export default function IdentificationLabScreen() {
               <Feather name="x" size={24} color={theme.text} />
             </TouchableOpacity>
             <ThemedText type="h3">AI Identification</ThemedText>
-            <View style={{ width: 24 }} />
+            <View style={{ width: 24 }}></View>
           </View>
 
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -1472,45 +1509,50 @@ export default function IdentificationLabScreen() {
                 {aiQuestions[currentQuestionIndex].type === 'multiple' && aiQuestions[currentQuestionIndex].options && (
                   <View style={{ gap: Spacing.sm }}>
                     {aiQuestions[currentQuestionIndex].options.map((option, index) => (
-                      <TouchableOpacity
-                        key={index}
-                        style={[
-                          styles.optionButton,
-                          {
-                            backgroundColor: theme.backgroundSecondary,
-                            borderColor: theme.border,
-                          }
-                        ]}
-                        onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, option)}
-                      >
-                        <ThemedText>{option}</ThemedText>
-                      </TouchableOpacity>
+                      <View key={index}>
+                        <TouchableOpacity
+                          style={[
+                            styles.optionButton,
+                            {
+                              backgroundColor: theme.backgroundSecondary,
+                              borderColor: theme.border,
+                            }
+                          ]}
+                          onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, option)}
+                        >
+                          <ThemedText>{option}</ThemedText>
+                        </TouchableOpacity>
+                      </View>
                     ))}
                   </View>
                 )}
 
                 {aiQuestions[currentQuestionIndex].type === 'binary' && (
                   <View style={{ flexDirection: 'row', gap: Spacing.md }}>
-                    <TouchableOpacity
-                      style={[
-                        styles.optionButton,
-                        styles.binaryButton,
-                        { backgroundColor: theme.success }
-                      ]}
-                      onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, true)}
-                    >
-                      <ThemedText style={{ color: '#FFFFFF' }}>Yes</ThemedText>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.optionButton,
-                        styles.binaryButton,
-                        { backgroundColor: theme.danger }
-                      ]}
-                      onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, false)}
-                    >
-                      <ThemedText style={{ color: '#FFFFFF' }}>No</ThemedText>
-                    </TouchableOpacity>
+                    <View>
+                      <TouchableOpacity
+                        style={[
+                          styles.optionButton,
+                          styles.binaryButton,
+                          { backgroundColor: theme.success }
+                        ]}
+                        onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, true)}
+                      >
+                        <ThemedText style={{ color: '#FFFFFF' }}>Yes</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                    <View>
+                      <TouchableOpacity
+                        style={[
+                          styles.optionButton,
+                          styles.binaryButton,
+                          { backgroundColor: theme.danger }
+                        ]}
+                        onPress={() => handleAIAnswer(aiQuestions[currentQuestionIndex].id, false)}
+                      >
+                        <ThemedText style={{ color: '#FFFFFF' }}>No</ThemedText>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
 
@@ -1559,48 +1601,51 @@ export default function IdentificationLabScreen() {
                     <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
                       QUICK OPTICAL TESTS
                     </ThemedText>
-                    <Pressable
-                      onPress={() => setIsEditing(!isEditing)}
-                      style={({ pressed }) => [
-                        styles.editButton,
-                        { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
-                      ]}
-                    >
-                      <Feather name="edit-2" size={16} color={theme.primary} />
-                    </Pressable>
+                    <View>
+                      <Pressable
+                        onPress={() => setIsEditing(!isEditing)}
+                        style={({ pressed }) => [
+                          styles.editButton,
+                          { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+                        ]}
+                      >
+                        <Feather name="edit-2" size={16} color={theme.primary} />
+                      </Pressable>
+                    </View>
                   </View>
                   
                   {/* Quick Optical Tests with Checkboxes */}
                   {opticalTests.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => toggleCheck(item.id)}
-                      style={({ pressed }) => [
-                        styles.checklistItem,
-                        { 
-                          backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
-                          opacity: pressed ? 0.8 : 1
-                        }
-                      ]}
-                    >
-                      <View style={[styles.checkbox, { 
-                        borderColor: item.checked ? theme.success : theme.border,
-                        backgroundColor: item.checked ? theme.success : 'transparent'
-                      }]}>
-                        {item.checked && (
-                          <Feather name="check" size={14} color="#FFFFFF" />
-                        )}
-                      </View>
-                      <ThemedText type="body" style={[
-                        styles.checklistText,
-                        { 
-                          color: item.checked ? theme.success : theme.text,
-                          textDecorationLine: item.checked ? 'line-through' : 'none'
-                        }
-                      ]}>
-                        {item.text}
-                      </ThemedText>
-                    </Pressable>
+                    <View key={item.id}>
+                      <Pressable
+                        onPress={() => toggleCheck(item.id)}
+                        style={({ pressed }) => [
+                          styles.checklistItem,
+                          { 
+                            backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                            opacity: pressed ? 0.8 : 1
+                          }
+                        ]}
+                      >
+                        <View style={[styles.checkbox, { 
+                          borderColor: item.checked ? theme.success : theme.border,
+                          backgroundColor: item.checked ? theme.success : 'transparent'
+                        }]}>
+                          {item.checked && (
+                            <Feather name="check" size={14} color="#FFFFFF" />
+                          )}
+                        </View>
+                        <ThemedText type="body" style={[
+                          styles.checklistText,
+                          { 
+                            color: item.checked ? theme.success : theme.text,
+                            textDecorationLine: item.checked ? 'line-through' : 'none'
+                          }
+                        ]}>
+                          {item.text}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
                   ))}
                 </Card>
 
@@ -1610,47 +1655,50 @@ export default function IdentificationLabScreen() {
                     <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
                       BUYING CHECKLIST & PRICING
                     </ThemedText>
-                    <Pressable
-                      onPress={() => setShowCalculator(!showCalculator)}
-                      style={({ pressed }) => [
-                        styles.editButton,
-                        { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
-                      ]}
-                    >
-                      <Feather name="dollar-sign" size={16} color={theme.primary} />
-                    </Pressable>
+                    <View>
+                      <Pressable
+                        onPress={() => setShowCalculator(!showCalculator)}
+                        style={({ pressed }) => [
+                          styles.editButton,
+                          { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+                        ]}
+                      >
+                        <Feather name="dollar-sign" size={16} color={theme.primary} />
+                      </Pressable>
+                    </View>
                   </View>
 
                   {checklist.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => toggleCheck(item.id)}
-                      style={({ pressed }) => [
-                        styles.checklistItem,
-                        { 
-                          backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
-                          opacity: pressed ? 0.8 : 1
-                        }
-                      ]}
-                    >
-                      <View style={[styles.checkbox, { 
-                        borderColor: item.checked ? theme.success : theme.border,
-                        backgroundColor: item.checked ? theme.success : 'transparent'
-                      }]}>
-                        {item.checked && (
-                          <Feather name="check" size={14} color="#FFFFFF" />
-                        )}
-                      </View>
-                      <ThemedText type="body" style={[
-                        styles.checklistText,
-                        { 
-                          color: item.checked ? theme.success : theme.text,
-                          textDecorationLine: item.checked ? 'line-through' : 'none'
-                        }
-                      ]}>
-                        {item.text}
-                      </ThemedText>
-                    </Pressable>
+                    <View key={item.id}>
+                      <Pressable
+                        onPress={() => toggleCheck(item.id)}
+                        style={({ pressed }) => [
+                          styles.checklistItem,
+                          { 
+                            backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                            opacity: pressed ? 0.8 : 1
+                          }
+                        ]}
+                      >
+                        <View style={[styles.checkbox, { 
+                          borderColor: item.checked ? theme.success : theme.border,
+                          backgroundColor: item.checked ? theme.success : 'transparent'
+                        }]}>
+                          {item.checked && (
+                            <Feather name="check" size={14} color="#FFFFFF" />
+                          )}
+                        </View>
+                        <ThemedText type="body" style={[
+                          styles.checklistText,
+                          { 
+                            color: item.checked ? theme.success : theme.text,
+                            textDecorationLine: item.checked ? 'line-through' : 'none'
+                          }
+                        ]}>
+                          {item.text}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
                   ))}
 
                   {/* Pricing Calculator Section */}
@@ -1686,24 +1734,25 @@ export default function IdentificationLabScreen() {
                         </ThemedText>
                         <View style={styles.gradeSelector}>
                           {(['A', 'B', 'C', 'D'] as const).map(grade => (
-                            <Pressable
-                              key={grade}
-                              onPress={() => setQualityGrade(grade)}
-                              style={[
-                                styles.gradeButton,
-                                { 
-                                  backgroundColor: qualityGrade === grade ? theme.primary : theme.inputBackground,
-                                  borderColor: theme.border
-                                }
-                              ]}
-                            >
-                              <ThemedText type="caption" style={{ 
-                                color: qualityGrade === grade ? '#FFFFFF' : theme.text,
-                                fontWeight: qualityGrade === grade ? '700' : '500'
-                              }}>
-                                {grade}
-                              </ThemedText>
-                            </Pressable>
+                            <View key={grade}>
+                              <Pressable
+                                onPress={() => setQualityGrade(grade)}
+                                style={[
+                                  styles.gradeButton,
+                                  { 
+                                    backgroundColor: qualityGrade === grade ? theme.primary : theme.inputBackground,
+                                    borderColor: theme.border
+                                  }
+                                ]}
+                              >
+                                <ThemedText type="caption" style={{ 
+                                  color: qualityGrade === grade ? '#FFFFFF' : theme.text,
+                                  fontWeight: qualityGrade === grade ? '700' : '500'
+                                }}>
+                                  {grade}
+                                </ThemedText>
+                              </Pressable>
+                            </View>
                           ))}
                         </View>
                       </View>
@@ -1747,21 +1796,23 @@ export default function IdentificationLabScreen() {
                       </View>
 
                       {/* Calculate Button */}
-                      <Pressable
-                        onPress={calculatePrice}
-                        style={({ pressed }) => [
-                          styles.calculateButton,
-                          { 
-                            backgroundColor: theme.primary,
-                            opacity: pressed ? 0.8 : 1
-                          }
-                        ]}
-                      >
-                        <Feather name="dollar-sign" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
-                        <ThemedText type="body" style={{ color: "#FFFFFF", fontWeight: '700' }}>
-                          Calculate Price
-                        </ThemedText>
-                      </Pressable>
+                      <View>
+                        <Pressable
+                          onPress={calculatePrice}
+                          style={({ pressed }) => [
+                            styles.calculateButton,
+                            { 
+                              backgroundColor: theme.primary,
+                              opacity: pressed ? 0.8 : 1
+                            }
+                          ]}
+                        >
+                          <Feather name="dollar-sign" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
+                          <ThemedText type="body" style={{ color: "#FFFFFF", fontWeight: '700' }}>
+                            Calculate Price
+                          </ThemedText>
+                        </Pressable>
+                      </View>
 
                       {/* Calculated Price Display */}
                       {calculatedPrice && (
@@ -1915,6 +1966,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     fontWeight: '600',
   },
+  fieldLabel: {
+    marginBottom: Spacing.sm,
+    fontWeight: '500',
+    fontSize: 14,
+  },
   chipsContainer: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -2000,6 +2056,12 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: Spacing['2xl'],
+  },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2064,10 +2126,51 @@ const styles = StyleSheet.create({
   resultContainer: {
     gap: Spacing.lg,
   },
+  resultHeader: {
+    alignItems: 'center',
+  },
+  confidenceBadge: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   resetButton: {
     marginTop: Spacing.lg,
   },
   buyingGuideButton: {
+    marginTop: Spacing.md,
+  },
+  backButton: {
+    borderWidth: 1,
+    borderColor: '#9333EA',
+  },
+  otherCard: {
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+  },
+  otherCardImageWrapper: {
+    width: '100%',
+    height: 80,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    marginBottom: Spacing.sm,
+  },
+  otherCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  otherCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  otherCardBody: {
+    marginTop: Spacing.xs,
+  },
+  actionButtons: {
     marginTop: Spacing.md,
   },
   // Buying Guide Styles

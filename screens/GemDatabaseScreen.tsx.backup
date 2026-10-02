@@ -1,0 +1,4069 @@
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { 
+  StyleSheet, 
+  View, 
+  FlatList,
+  Pressable,
+  Modal,
+  ScrollView,
+  TextInput,
+  Image,
+  Dimensions,
+  Animated,
+  Alert,
+} from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import { Platform } from "react-native";
+import ImagePalette from "react-native-image-palette";
+
+import { ThemedText } from "@/components/ThemedText";
+import { ThemedView } from "@/components/ThemedView";
+import { Card } from "@/components/Card";
+import { Input } from "@/components/Input";
+import { Button } from "@/components/Button";
+import { SelectableFieldWithOther, FieldValue } from "@/components/SelectableFieldWithOther";
+import { useTheme } from "@/hooks/useTheme";
+
+// Safety wrapper to ensure theme is always available
+function getThemeSafe() {
+  try {
+    const result = useTheme();
+    if (result && result.theme) {
+      return result;
+    }
+  } catch (e) {
+    // Fall through to default
+  }
+  return {
+    theme: {
+      text: "#0F172A",
+      textSecondary: "#64748B",
+      primary: "#8B5CF6",
+      secondary: "#F59E0B",
+      success: "#10B981",
+      backgroundRoot: "#F8FAFC",
+      backgroundDefault: "#FFFFFF",
+      backgroundSecondary: "#F1F5F9",
+      border: "#E2E8F0",
+      inputBackground: "#FFFFFF",
+    },
+    isDark: false,
+  };
+}
+import { useScreenInsets } from "@/hooks/useScreenInsets";
+import { Spacing, BorderRadius } from "@/constants/theme";
+import { GEMSTONE_DATABASE, GEM_CATEGORIES, Gemstone } from "@/constants/gemstoneData";
+import { getCustomGemstones, getAllGemstones, saveCustomGemstone, updateCustomGemstone, deleteCustomGemstone, uploadGemstoneImage, CustomGemstone } from "@/services/gemstoneService";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigation } from "@react-navigation/native";
+
+// Option lists for selectable fields
+const VARIETY_OPTIONS = ["Ruby", "Sapphire", "Emerald", "Topaz", "Garnet", "Quartz", "Tourmaline", "Zircon"] as const;
+const CRYSTAL_SYSTEM_OPTIONS = ["Cubic", "Trigonal", "Hexagonal", "Orthorhombic", "Monoclinic", "Triclinic", "Amorphous"] as const;
+const TRANSPARENCY_OPTIONS = ["Transparent", "Translucent", "Opaque"] as const;
+const LUSTER_OPTIONS = ["Vitreous", "Resinous", "Greasy", "Adamantine", "Waxy", "Dull"] as const;
+const PLEOCHROISM_OPTIONS = ["None", "Weak", "Medium", "Strong"] as const;
+const OPTIC_CHARACTER_OPTIONS = ["SR", "DR", "AGG"] as const;
+const HARDNESS_OPTIONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] as const;
+const CLEAVAGE_OPTIONS = ["None", "Poor", "Good", "Perfect"] as const;
+const FRACTURE_OPTIONS = ["Conchoidal", "Uneven", "Fibrous", "Hackly"] as const;
+const CLARITY_OPTIONS = ["IF", "VVS", "VS", "SI", "I"] as const;
+const TREATMENT_OPTIONS = ["Untreated", "Heated", "Irradiated", "Glass-filled", "Oiled", "Diffused"] as const;
+
+// Buying Guide Content Component
+const BuyingGuideContent = React.memo(function BuyingGuideContent({ gemstone, theme }: { gemstone: Gemstone; theme: any }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [checklist, setChecklist] = useState([
+    { id: 1, text: "Check for color consistency and saturation", checked: false },
+    { id: 2, text: "Verify clarity and inclusion patterns", checked: false },
+    { id: 3, text: "Test refractive index with refractometer", checked: false },
+    { id: 4, text: "Check specific gravity with hydrostatic weighing", checked: false },
+    { id: 5, text: "Examine cut quality and proportions", checked: false },
+    { id: 6, text: "Look for treatments and enhancements", checked: false },
+    { id: 7, text: "Verify origin and certification", checked: false },
+    { id: 8, text: "Compare market price per carat", checked: false },
+  ]);
+
+  // Pricing calculator state
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [caratWeight, setCaratWeight] = useState('');
+  const [qualityGrade, setQualityGrade] = useState('A'); // A, B, C, D grades
+  const [customPricePerCarat, setCustomPricePerCarat] = useState('');
+  const [priceAdjustment, setPriceAdjustment] = useState('0'); // percentage adjustment
+  const [calculatedPrice, setCalculatedPrice] = useState<{ inr: number; usd: number } | null>(null);
+
+  // Custom price multipliers for quality grades
+  const qualityMultipliers = {
+    'A': 1.0, // Base price
+    'B': 0.8, // 20% less
+    'C': 0.6, // 40% less
+    'D': 0.4, // 60% less
+  };
+
+  // Calculate price function
+  const calculatePrice = () => {
+    if (!caratWeight || parseFloat(caratWeight) <= 0) {
+      alert('Please enter a valid carat weight');
+      return;
+    }
+
+    const weight = parseFloat(caratWeight);
+    const basePriceINR = customPricePerCarat ? 
+      parseFloat(customPricePerCarat) : 
+      (gemstone.priceRangeINR.min + gemstone.priceRangeINR.max) / 2;
+    
+    const basePriceUSD = customPricePerCarat ? 
+      parseFloat(customPricePerCarat) / 83 : // Approximate conversion rate
+      (gemstone.priceRangeUSD.min + gemstone.priceRangeUSD.max) / 2;
+
+    // Apply quality multiplier
+    const qualityMultiplier = qualityMultipliers[qualityGrade as keyof typeof qualityMultipliers];
+    
+    // Apply price adjustment
+    const adjustmentMultiplier = 1 + (parseFloat(priceAdjustment) || 0) / 100;
+    
+    // Calculate final price
+    const finalPriceINR = Math.round(weight * basePriceINR * qualityMultiplier * adjustmentMultiplier);
+    const finalPriceUSD = Math.round(weight * basePriceUSD * qualityMultiplier * adjustmentMultiplier);
+    
+    setCalculatedPrice({ inr: finalPriceINR, usd: finalPriceUSD });
+  };
+
+  // Real gemstone-specific optical tests using actual database data
+  const getOpticalTests = useCallback((gemstone: Gemstone) => {
+    // Dynamic optical tests based on actual gemstone data
+    return [
+      { id: 9, text: `Check SR/DR: ${gemstone.opticCharacter || 'Unknown'} - ${gemstone.variety} optical character`, checked: false },
+      { id: 10, text: `Pleochroism: ${gemstone.pleochroism || 'Unknown'} - Check with dichroscope`, checked: false },
+      { id: 11, text: `Luster: ${gemstone.luster || 'Unknown'} - ${gemstone.variety} luster type`, checked: false },
+      { id: 12, text: `Inclusions: ${gemstone.inclusions.slice(0, 2).join(', ') || 'Characteristic inclusions'}`, checked: false },
+      { id: 13, text: `UV Test: ${gemstone.uvResponse || 'Check fluorescence under UV light'}`, checked: false },
+      { id: 14, text: `SG Test: ${gemstone.sgMin || 'Unknown'}-${gemstone.sgMax || 'Unknown'} - Specific gravity test`, checked: false },
+    ];
+  }, []);
+
+  const [opticalTests, setOpticalTests] = useState(() => getOpticalTests(gemstone));
+
+  // Update optical tests when gemstone changes
+  useEffect(() => {
+    setOpticalTests(getOpticalTests(gemstone));
+  }, [gemstone, getOpticalTests]);
+
+  const toggleCheck = (id: number) => {
+    // Update main checklist
+    setChecklist(prev => prev.map(item => 
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+    // Update optical tests
+    setOpticalTests(prev => prev.map(item => 
+      item.id === id ? { ...item, checked: !item.checked } : item
+    ));
+  };
+
+  const addCheckItem = (text: string) => {
+    const newItem = {
+      id: Date.now(),
+      text,
+      checked: false
+    };
+    setChecklist(prev => [...prev, newItem]);
+  };
+
+  return (
+    <>
+      {/* Quick Optical Tests Section - Now First */}
+      <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+        <View style={styles.buyingGuideHeader}>
+          <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+            QUICK OPTICAL TESTS
+          </ThemedText>
+          <Pressable
+            onPress={() => setIsEditing(!isEditing)}
+            style={({ pressed }) => [
+              styles.editButton,
+              { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+            ]}
+          >
+            <Feather name="edit-2" size={16} color={theme.primary} />
+          </Pressable>
+        </View>
+        
+        {/* Quick Optical Tests with Checkboxes */}
+        {opticalTests.map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => toggleCheck(item.id)}
+            style={({ pressed }) => [
+              styles.checklistItem,
+              { 
+                backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                opacity: pressed ? 0.8 : 1
+              }
+            ]}
+          >
+            <View style={[styles.checkbox, { 
+              borderColor: item.checked ? theme.success : theme.border,
+              backgroundColor: item.checked ? theme.success : 'transparent'
+            }]}>
+              {item.checked && (
+                <Feather name="check" size={14} color="#FFFFFF" />
+              )}
+            </View>
+            <ThemedText type="body" style={[
+              styles.checklistText,
+              { 
+                color: item.checked ? theme.success : theme.text,
+                textDecorationLine: item.checked ? 'line-through' : 'none'
+              }
+            ]}>
+              {item.text}
+            </ThemedText>
+          </Pressable>
+        ))}
+
+        {/* Detailed Quick Optical Tests */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="eye" size={20} color={theme.primary} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              Refractive Index Test (SR/DR)
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            {gemstone.opticCharacter === "DR" ? "Doubly Refractive (DR)" : "Singly Refractive (SR)"}
+          </ThemedText>
+          <View style={styles.testSteps}>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.primary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>1</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Place gemstone on refractometer
+              </ThemedText>
+            </View>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.primary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>2</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Observe shadow line: {gemstone.riMin} - {gemstone.riMax}
+              </ThemedText>
+            </View>
+            {gemstone.opticCharacter === "DR" && (
+              <View style={styles.testStep}>
+                <View style={[styles.stepBullet, { backgroundColor: theme.primary }]}>
+                  <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>3</ThemedText>
+                </View>
+                <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                  Look for double shadow lines (DR indication)
+                </ThemedText>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Pleochroism Test */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="droplet" size={20} color={theme.secondary} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              Pleochroism Test
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            {gemstone.pleochroism || "None"}
+          </ThemedText>
+          <View style={styles.testSteps}>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.secondary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>1</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Use dichroscope to view color changes
+              </ThemedText>
+            </View>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.secondary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>2</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Rotate stone to observe different colors
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {/* Luster Test */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="sun" size={20} color={theme.warning} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              Luster Test
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            {gemstone.luster}
+          </ThemedText>
+          <View style={styles.testSteps}>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.warning }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>1</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Observe surface reflection under direct light
+              </ThemedText>
+            </View>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.warning }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>2</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Compare to reference chart for luster type
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {/* Inclusion Identification */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="search" size={20} color={theme.success} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              Inclusion Identification
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            Look for these characteristic inclusions:
+          </ThemedText>
+          
+          {/* Inclusion chips with indicators */}
+          <View style={styles.inclusionGuide}>
+            {gemstone.inclusions.map((inclusion, idx) => (
+              <View key={idx} style={styles.inclusionItem}>
+                <View style={[styles.inclusionIcon, { backgroundColor: theme.success + "20" }]}>
+                  <Feather name="eye" size={16} color={theme.success} />
+                </View>
+                <View style={styles.inclusionInfo}>
+                  <ThemedText type="body" style={{ color: theme.text, fontWeight: '600' }}>
+                    {inclusion}
+                  </ThemedText>
+                  <ThemedText type="caption" style={{ color: theme.textSecondary }}>
+                    Use 10x loupe for best visibility
+                  </ThemedText>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Inclusion Images if available */}
+          {gemstone.inclusionImages && gemstone.inclusionImages.length > 0 && (
+            <View style={styles.inclusionImageSection}>
+              <ThemedText type="caption" style={{ color: theme.textSecondary, marginBottom: Spacing.sm }}>
+                Reference Inclusion Photos:
+              </ThemedText>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.inclusionImagesContainer}
+              >
+                {gemstone.inclusionImages.map((imgUrl, idx) => (
+                  <View key={idx} style={[styles.inclusionImageWrapper, { borderColor: theme.border }]}>
+                    <ExpoImage
+                      source={{ uri: imgUrl }}
+                      style={styles.inclusionImage}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                    <View style={[styles.imageLabel, { backgroundColor: theme.backgroundSecondary }]}>
+                      <ThemedText type="caption" style={{ color: theme.textSecondary, fontSize: 11 }}>
+                        Inclusion #{idx + 1}
+                      </ThemedText>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+
+        {/* UV Light Test */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="zap" size={20} color={theme.primary} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              UV Light Test
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            {gemstone.uvResponse || "No fluorescence"}
+          </ThemedText>
+          <View style={styles.testSteps}>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.primary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>1</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Test under long-wave UV (365nm)
+              </ThemedText>
+            </View>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.primary }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>2</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Test under short-wave UV (254nm)
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {/* Specific Gravity Test */}
+        <View style={styles.testSection}>
+          <View style={styles.testHeader}>
+            <Feather name="activity" size={20} color={theme.success} />
+            <ThemedText type="h4" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+              Specific Gravity Test
+            </ThemedText>
+          </View>
+          <ThemedText type="body" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            Expected range: {gemstone.sgMin} - {gemstone.sgMax}
+          </ThemedText>
+          <View style={styles.testSteps}>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.success }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>1</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Use hydrostatic weighing method
+              </ThemedText>
+            </View>
+            <View style={styles.testStep}>
+              <View style={[styles.stepBullet, { backgroundColor: theme.success }]}>
+                <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>2</ThemedText>
+              </View>
+              <ThemedText type="body" style={{ color: theme.text, marginLeft: Spacing.sm }}>
+                Compare to heavy liquids for quick estimate
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+
+        {isEditing && (
+          <View style={styles.addCheckSection}>
+            <TextInput
+              style={[styles.addCheckInput, { 
+                backgroundColor: theme.inputBackground,
+                color: theme.text,
+                borderColor: theme.border
+              }]}
+              placeholder="Add new checklist item..."
+              placeholderTextColor={theme.textSecondary}
+              onSubmitEditing={(e) => {
+                if (e.nativeEvent.text.trim()) {
+                  addCheckItem(e.nativeEvent.text.trim());
+                  e.nativeEvent.text = '';
+                }
+              }}
+            />
+          </View>
+        )}
+      </Card>
+
+      {/* Buying Checklist Card - Now Second */}
+      <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+        <View style={styles.buyingGuideHeader}>
+          <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+            BUYING CHECKLIST & PRICING
+          </ThemedText>
+          <Pressable
+            onPress={() => setShowCalculator(!showCalculator)}
+            style={({ pressed }) => [
+              styles.editButton,
+              { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+            ]}
+          >
+            <Feather name="dollar-sign" size={16} color={theme.primary} />
+          </Pressable>
+        </View>
+
+        {checklist.filter(item => item.id < 9).map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => toggleCheck(item.id)}
+            style={({ pressed }) => [
+              styles.checklistItem,
+              { 
+                backgroundColor: item.checked ? theme.success + "10" : theme.backgroundSecondary,
+                opacity: pressed ? 0.8 : 1
+              }
+            ]}
+          >
+            <View style={[styles.checkbox, { 
+              borderColor: item.checked ? theme.success : theme.border,
+              backgroundColor: item.checked ? theme.success : 'transparent'
+            }]}>
+              {item.checked && (
+                <Feather name="check" size={14} color="#FFFFFF" />
+              )}
+            </View>
+            <ThemedText type="body" style={[
+              styles.checklistText,
+              { 
+                color: item.checked ? theme.success : theme.text,
+                textDecorationLine: item.checked ? 'line-through' : 'none'
+              }
+            ]}>
+              {item.text}
+            </ThemedText>
+          </Pressable>
+        ))}
+
+        {/* Pricing Calculator Section */}
+        {showCalculator && (
+          <View style={[styles.calculatorSection, { backgroundColor: theme.backgroundSecondary }]}>
+            <ThemedText type="h4" style={{ color: theme.text, marginBottom: Spacing.md }}>
+              Quick Pricing Calculator
+            </ThemedText>
+            
+            {/* Carat Weight Input */}
+            <View style={styles.inputRow}>
+              <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                Carat Weight:
+              </ThemedText>
+              <TextInput
+                style={[styles.calculatorInput, { 
+                  backgroundColor: theme.inputBackground,
+                  color: theme.text,
+                  borderColor: theme.border
+                }]}
+                placeholder="Enter carats"
+                placeholderTextColor={theme.textSecondary}
+                value={caratWeight}
+                onChangeText={setCaratWeight}
+                keyboardType="numeric"
+              />
+            </View>
+
+            {/* Quality Grade Selector */}
+            <View style={styles.inputRow}>
+              <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                Quality Grade:
+              </ThemedText>
+              <View style={styles.gradeSelector}>
+                {(['A', 'B', 'C', 'D'] as const).map(grade => (
+                  <Pressable
+                    key={grade}
+                    onPress={() => setQualityGrade(grade)}
+                    style={[
+                      styles.gradeButton,
+                      { 
+                        backgroundColor: qualityGrade === grade ? theme.primary : theme.inputBackground,
+                        borderColor: theme.border
+                      }
+                    ]}
+                  >
+                    <ThemedText type="caption" style={{ 
+                      color: qualityGrade === grade ? '#FFFFFF' : theme.text,
+                      fontWeight: qualityGrade === grade ? '700' : '500'
+                    }}>
+                      {grade}
+                    </ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {/* Custom Price Per Carat */}
+            <View style={styles.inputRow}>
+              <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                Custom Price/ct:
+              </ThemedText>
+              <TextInput
+                style={[styles.calculatorInput, { 
+                  backgroundColor: theme.inputBackground,
+                  color: theme.text,
+                  borderColor: theme.border
+                }]}
+                placeholder={`Default: ₹${Math.round((gemstone.priceRangeINR.min + gemstone.priceRangeINR.max) / 2)}`}
+                placeholderTextColor={theme.textSecondary}
+                value={customPricePerCarat}
+                onChangeText={setCustomPricePerCarat}
+                keyboardType="numeric"
+              />
+            </View>
+
+            {/* Price Adjustment */}
+            <View style={styles.inputRow}>
+              <ThemedText type="body" style={{ color: theme.text, width: 100 }}>
+                Adjustment %:
+              </ThemedText>
+              <TextInput
+                style={[styles.calculatorInput, { 
+                  backgroundColor: theme.inputBackground,
+                  color: theme.text,
+                  borderColor: theme.border
+                }]}
+                placeholder="+/- %"
+                placeholderTextColor={theme.textSecondary}
+                value={priceAdjustment}
+                onChangeText={setPriceAdjustment}
+                keyboardType="numeric"
+              />
+            </View>
+
+            {/* Calculate Button */}
+            <Pressable
+              onPress={calculatePrice}
+              style={({ pressed }) => [
+                styles.calculateButton,
+                { 
+                  backgroundColor: theme.primary,
+                  opacity: pressed ? 0.8 : 1
+                }
+              ]}
+            >
+              <Feather name="dollar-sign" size={16} color="#FFFFFF" style={{ marginRight: Spacing.sm }} />
+              <ThemedText type="body" style={{ color: "#FFFFFF", fontWeight: '700' }}>
+                Calculate Price
+              </ThemedText>
+            </Pressable>
+
+            {/* Calculated Price Display */}
+            {calculatedPrice && (
+              <View style={[styles.priceResult, { backgroundColor: theme.success + "15" }]}>
+                <ThemedText type="h4" style={{ color: theme.success, fontWeight: '800', textAlign: 'center' }}>
+                  Estimated Price
+                </ThemedText>
+                <View style={styles.priceRow}>
+                  <ThemedText type="body" style={{ color: theme.textSecondary }}>
+                    INR: 
+                  </ThemedText>
+                  <ThemedText type="h4" style={{ color: theme.success, fontWeight: '800' }}>
+                    ₹{calculatedPrice.inr.toLocaleString()}
+                  </ThemedText>
+                </View>
+                <View style={styles.priceRow}>
+                  <ThemedText type="body" style={{ color: theme.textSecondary }}>
+                    USD: 
+                  </ThemedText>
+                  <ThemedText type="h4" style={{ color: theme.primary, fontWeight: '800' }}>
+                    ${calculatedPrice.usd.toLocaleString()}
+                  </ThemedText>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+      </Card>
+    </>
+  );
+});
+
+export default function GemDatabaseScreen() {
+  const { theme } = getThemeSafe();
+  const { paddingTop, paddingBottom, scrollInsetBottom } = useScreenInsets();
+  const { user } = useAuth();
+  const navigation = useNavigation();
+  
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [selectedGem, setSelectedGem] = useState<Gemstone | null>(null);
+  const [activeTab, setActiveTab] = useState<"properties" | "formation" | "market" | "testing" | "buying">("properties");
+  const [showAddStoneModal, setShowAddStoneModal] = useState(false);
+  const [editingGemstone, setEditingGemstone] = useState<Gemstone | null>(null);
+  const [customStones, setCustomStones] = useState<Gemstone[]>([]);
+  const [isLoadingGems, setIsLoadingGems] = useState(false);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [colorAnalysis, setColorAnalysis] = useState<any>(null);
+  const [isAnalyzingColor, setIsAnalyzingColor] = useState(false);
+  const [isUpdatingGemstone, setIsUpdatingGemstone] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
+  // Semi-precious filters
+  const [showSemiPreciousFilters, setShowSemiPreciousFilters] = useState(false);
+  const [selectedSemiPreciousColors, setSelectedSemiPreciousColors] = useState<string[]>([]);
+  const [selectedSemiPreciousHardness, setSelectedSemiPreciousHardness] = useState<string>('All');
+  const [selectedSemiPreciousTransparency, setSelectedSemiPreciousTransparency] = useState<string>('All');
+  const [showColorModal, setShowColorModal] = useState(false);
+  const [showHardnessModal, setShowHardnessModal] = useState(false);
+  const [showTransparencyModal, setShowTransparencyModal] = useState(false);
+  
+  // Animation for header shrinking - Enhanced smooth scrolling with compact header
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const HEADER_MAX_HEIGHT = 280;
+  const HEADER_MIN_HEIGHT = 120;
+  const COMPACT_HEADER_THRESHOLD = 180; // When to start showing compact header
+  
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
+    outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
+    extrapolate: 'clamp',
+  });
+  
+  // Compact header animations
+  const compactHeaderOpacity = scrollY.interpolate({
+    inputRange: [COMPACT_HEADER_THRESHOLD - 20, COMPACT_HEADER_THRESHOLD],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  
+  const compactHeaderTranslateY = scrollY.interpolate({
+    inputRange: [COMPACT_HEADER_THRESHOLD - 20, COMPACT_HEADER_THRESHOLD],
+    outputRange: [20, 0],
+    extrapolate: 'clamp',
+  });
+  
+  // Hero section fade out
+  const heroSectionOpacity = scrollY.interpolate({
+    inputRange: [COMPACT_HEADER_THRESHOLD - 30, COMPACT_HEADER_THRESHOLD],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  
+  // Smoother image animations with reduced movement
+  const heroImageScale = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [1, 0.6],
+    extrapolate: 'clamp',
+  });
+  
+  const heroImageOpacity = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [1, 0.8],
+    extrapolate: 'clamp',
+  });
+  
+  const heroImageTranslateX = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [0, -80],
+    extrapolate: 'clamp',
+  });
+  
+  const heroImageTranslateY = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [0, 20],
+    extrapolate: 'clamp',
+  });
+  
+  // Enhanced title animations with better stability
+  const titleOpacity = scrollY.interpolate({
+    inputRange: [0, 120],
+    outputRange: [1, 0.95],
+    extrapolate: 'clamp',
+  });
+  
+  const titleTranslateX = scrollY.interpolate({
+    inputRange: [0, 150],
+    outputRange: [0, -20],
+    extrapolate: 'clamp',
+  });
+  
+  const titleTranslateY = scrollY.interpolate({
+    inputRange: [0, 80],
+    outputRange: [0, -30],
+    extrapolate: 'clamp',
+  });
+  
+  const titleScale = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
+    outputRange: [1, 0.85],
+    extrapolate: 'clamp',
+  });
+
+  // Load gemstones from Supabase (or fallback to local)
+  const loadGemstones = async () => {
+    setIsLoadingGems(true);
+    try {
+      console.log('🔄 Loading gemstones from database...');
+      // Load from Supabase (both public and custom)
+      const allGemsFromDB = await getAllGemstones();
+      console.log(`✅ Loaded ${allGemsFromDB.length} gemstone(s) from database`);
+      
+      if (allGemsFromDB.length > 0) {
+        setCustomStones(allGemsFromDB);
+        console.log('📊 Database gemstones:', allGemsFromDB.map(g => g.variety).join(', '));
+      } else {
+        console.log('⚠️  No gemstones found in database, using local fallback');
+        // Fallback to local database
+        setCustomStones([]);
+      }
+    } catch (error) {
+      console.error('❌ Error loading gemstones from database:', error);
+      // Fallback to empty array (will use local GEMSTONE_DATABASE)
+      setCustomStones([]);
+    } finally {
+      setIsLoadingGems(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGemstones();
+  }, []);
+
+  // Merge database stones (prioritize database over local)
+  const allGems = useMemo(() => {
+    // Database stones first, then local fallback
+    if (customStones.length > 0) {
+      console.log('🔍 Using custom stones:', customStones.map(g => `${g.variety} (${g.id})`).join(', '));
+      return customStones;
+    }
+    console.log('🔍 Using fallback GEMSTONE_DATABASE');
+    return GEMSTONE_DATABASE;
+  }, [customStones]);
+
+  const filteredGems = useMemo(() => {
+  if (!searchQuery.trim()) {
+    return allGems.filter(gem => 
+      selectedCategory === "All" || gem.category === selectedCategory
+    );
+  }
+
+  const searchLower = searchQuery.toLowerCase();
+  const filtered = allGems.filter(gem => {
+    // Combine all searchable properties into one string
+    const searchableText = [
+      gem.variety || '',
+      gem.indianName || '',
+      `${gem.riMin || 0}-${gem.riMax || 0}`,
+      `${gem.sgMin || 0}-${gem.sgMax || 0}`,
+      gem.pleochroism || '',
+      gem.opticCharacter || '',
+      gem.crystalSystem || '',
+      gem.hardness?.toString() || '',
+      gem.cleavage || '',
+      gem.fracture || '',
+      gem.luster || '',
+      ...(gem.transparency || []),
+      ...(gem.inclusions || []),
+      gem.uvResponse || '',
+      gem.causeOfColor || '',
+      gem.chemicalComposition || '',
+      ...(gem.colors || []),
+      ...(gem.treatments || []),
+      ...(gem.simulants || []),
+      ...(gem.occurrences || []),
+      gem.category || ''
+    ].join(' ').toLowerCase();
+
+    const matchesSearch = searchableText.includes(searchLower);
+    const matchesCategory = selectedCategory === "All" || gem.category === selectedCategory;
+    
+    // Semi-precious filters
+    let matchesSemiPreciousFilters = true;
+    if (selectedCategory === 'Semi-precious' && showSemiPreciousFilters) {
+      // Color filter
+      if (selectedSemiPreciousColors.length > 0) {
+        matchesSemiPreciousFilters = selectedSemiPreciousColors.some(color => 
+          gem.colors.some(gemColor => 
+            gemColor.toLowerCase().includes(color.toLowerCase())
+          )
+        );
+      }
+      
+      // Hardness filter
+      if (matchesSemiPreciousFilters && selectedSemiPreciousHardness !== 'All') {
+        if (selectedSemiPreciousHardness === 'Soft') {
+          matchesSemiPreciousFilters = gem.hardness <= 6;
+        } else if (selectedSemiPreciousHardness === 'Medium') {
+          matchesSemiPreciousFilters = gem.hardness > 6 && gem.hardness <= 7.5;
+        } else if (selectedSemiPreciousHardness === 'Hard') {
+          matchesSemiPreciousFilters = gem.hardness > 7.5;
+        }
+      }
+      
+      // Transparency filter
+      if (matchesSemiPreciousFilters && selectedSemiPreciousTransparency !== 'All') {
+        matchesSemiPreciousFilters = gem.transparency.includes(selectedSemiPreciousTransparency);
+      }
+    }
+    
+    return matchesSearch && matchesCategory && matchesSemiPreciousFilters;
+  });
+
+  // Color Analysis Function
+  const analyzeImageColors = async (imageUrl: string) => {
+    if (!imageUrl) return;
+    
+    setIsAnalyzingColor(true);
+    
+    try {
+      const palette = await ImagePalette.getPalette(imageUrl, {
+        platform: 'ios',
+      });
+      
+      const analysis = {
+        dominant: palette.dominant?.color || '#000000',
+        vibrant: palette.vibrant?.color || '#000000',
+        lightVibrant: palette.lightVibrant?.color || '#000000',
+        darkVibrant: palette.darkVibrant?.color || '#000000',
+      };
+      
+      setColorAnalysis(analysis);
+    } catch (error) {
+      console.error('Color analysis failed:', error);
+      Alert.alert('Error', 'Failed to analyze image colors');
+    } finally {
+      setIsAnalyzingColor(false);
+    }
+  };
+  
+  // Trigger color analysis when gemstone is selected
+  useEffect(() => {
+    if (selectedGem?.image) {
+      setColorAnalysis(null); // Reset previous analysis
+      analyzeImageColors(selectedGem.image);
+    } else {
+      setColorAnalysis(null);
+    }
+  }, [selectedGem?.image]);
+
+  return filtered;
+}, [searchQuery, selectedCategory, allGems]);
+
+  const renderGemItem = ({ item }: { item: Gemstone }) => {
+    // Calculate average price
+    const avgPriceINR = item.priceRangeINR.min > 0 && item.priceRangeINR.max > 0
+      ? Math.round((item.priceRangeINR.min + item.priceRangeINR.max) / 2)
+      : 0;
+    
+    if (viewMode === 'list') {
+      return (
+        <Pressable
+          onPress={() => setSelectedGem(item)}
+          style={({ pressed }) => [
+            styles.listItemWrapper,
+            { opacity: pressed ? 0.8 : 1 }
+          ]}
+        >
+          <View style={[styles.listItem, { backgroundColor: theme.backgroundDefault, borderBottomColor: theme.border }]}>
+            {/* Left side - Image */}
+            <View style={styles.listItemImageContainer}>
+              {item.image ? (
+                <ExpoImage
+                  source={{ uri: item.image }}
+                  style={styles.listItemImage}
+                  contentFit="cover"
+                  transition={200}
+                />
+              ) : (
+                <View 
+                  style={[
+                    styles.listItemImagePlaceholder,
+                    { backgroundColor: getGemColor(item.colors?.[0]) + "20" }
+                  ]}
+                >
+                  <Feather 
+                    name="hexagon" 
+                    size={20} 
+                    color={getGemColor(item.colors?.[0])} 
+                  />
+                </View>
+              )}
+            </View>
+            
+            {/* Middle - Gem Info */}
+            <View style={styles.listItemInfo}>
+              <View style={styles.listItemHeader}>
+                <ThemedText type="h4" style={styles.listItemName}>{item.variety}</ThemedText>
+                <View 
+                  style={[
+                    styles.categoryBadge,
+                    { 
+                      backgroundColor: item.category === "Precious" 
+                        ? theme.secondary 
+                        : item.category === "Semi-precious"
+                          ? theme.primary
+                          : theme.success
+                    }
+                  ]}
+                >
+                  <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: '600' }}>
+                    {item.category}
+                  </ThemedText>
+                </View>
+              </View>
+              {item.indianName && (
+                <ThemedText type="caption" style={[styles.listItemSubtitle, { color: theme.textSecondary }]}>
+                  {item.indianName}
+                </ThemedText>
+              )}
+            </View>
+          </View>
+        </Pressable>
+      );
+    }
+    
+    // Current card view - exactly as it is now (unchanged)
+    
+    return (
+    <Pressable
+      onPress={() => setSelectedGem(item)}
+        style={({ pressed }) => [
+          styles.gemCardWrapper,
+          { opacity: pressed ? 0.8 : 1 }
+        ]}
+    >
+        <Card style={styles.gemCard} elevation={2}>
+        <View style={styles.gemCardContent}>
+            {/* Thumbnail Section */}
+            <View style={styles.thumbnailContainer}>
+          {item.image ? (
+            <ExpoImage
+              source={{ uri: item.image }}
+              style={styles.gemThumbnail}
+              contentFit="cover"
+              transition={200}
+            />
+          ) : (
+          <View 
+            style={[
+              styles.gemThumbnail,
+                    styles.gemThumbnailPlaceholder,
+                    { backgroundColor: getGemColor(item.colors?.[0]) + "20" }
+            ]}
+          >
+            <Feather 
+              name="hexagon" 
+                    size={32} 
+              color={getGemColor(item.colors?.[0])} 
+            />
+          </View>
+          )}
+          </View>
+
+            {/* Content Section */}
+            <View style={styles.gemInfo}>
+              {/* Header */}
+              <View style={styles.gemHeader}>
+                <View style={styles.gemTitleContainer}>
+                  <ThemedText type="h4" style={styles.gemTitle}>
+                    {item.variety}
+                  </ThemedText>
+                  <ThemedText type="caption" style={[styles.gemSubtitle, { color: theme.primary }]}>
+                    {item.indianName}
+              </ThemedText>
+            </View>
+            <Feather name="chevron-right" size={20} color={theme.textSecondary} />
+              </View>
+
+              {/* Optical Properties */}
+              <View style={styles.opticalSection}>
+                <View style={styles.opticalRow}>
+                  <View style={styles.opticalItem}>
+                    <ThemedText type="caption" style={styles.opticalLabel}>
+                      OPTIC:
+                    </ThemedText>
+                    <ThemedText type="caption" style={styles.opticalValue}>
+                      {item.opticCharacter || "N/A"}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.opticalDivider} />
+                  <View style={styles.opticalItem}>
+                    <ThemedText type="caption" style={styles.opticalLabel}>
+                      PLEO:
+                    </ThemedText>
+                    <ThemedText type="caption" style={styles.opticalValue} numberOfLines={1}>
+                      {item.pleochroism ? item.pleochroism.toUpperCase().substring(0, 12) + (item.pleochroism.length > 12 ? "..." : "") : "NONE"}
+                    </ThemedText>
+                  </View>
+                </View>
+              </View>
+
+              {/* Properties Row */}
+              <View style={styles.propertiesRow}>
+                <View style={[styles.propertyBadge, { backgroundColor: theme.primary + "15" }]}>
+                  <ThemedText type="caption" style={[styles.propertyLabel, { color: theme.textSecondary }]}>
+                    RI
+                  </ThemedText>
+                  <ThemedText type="caption" style={[styles.propertyValue, { color: theme.primary }]}>
+                    {item.riMin > 0 && item.riMax > 0 
+                      ? `${item.riMin.toFixed(3)}-${item.riMax.toFixed(3)}`
+                      : "N/A"}
+                  </ThemedText>
+                </View>
+                <View style={[styles.propertyBadge, { backgroundColor: theme.success + "15" }]}>
+                  <ThemedText type="caption" style={[styles.propertyLabel, { color: theme.textSecondary }]}>
+                    SG
+                  </ThemedText>
+                  <ThemedText type="caption" style={[styles.propertyValue, { color: theme.success }]}>
+                    {item.sgMin > 0 && item.sgMax > 0
+                      ? `${item.sgMin.toFixed(2)}-${item.sgMax.toFixed(2)}`
+                      : "N/A"}
+                  </ThemedText>
+                </View>
+                </View>
+          </View>
+        </View>
+
+        {/* Category Badge Overlay - Bottom Left */}
+        <View style={[
+          styles.categoryBadgeOverlay,
+          { 
+            backgroundColor: item.category === "Precious" 
+              ? theme.secondary 
+              : item.category === "Semi-precious"
+                ? theme.primary
+                : theme.success
+          }
+        ]}>
+          <ThemedText 
+            type="caption" 
+            style={{ 
+              color: "#FFFFFF",
+              fontSize: 10,
+              fontWeight: "700",
+              letterSpacing: 0.5
+            }}
+          >
+            {item.category.toUpperCase()}
+          </ThemedText>
+        </View>
+      </Card>
+    </Pressable>
+  );
+  };
+
+  return (
+    <>
+      <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+        <View style={[styles.searchContainer, { paddingTop: 50 + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
+          {/* Header with title and view toggle */}
+          <View style={styles.headerContainer}>
+            <ThemedText type="h1" style={styles.headerTitle}>Gems</ThemedText>
+            <View style={styles.headerButtons}>
+              <Pressable
+                onPress={() => navigation.navigate('GemComparison' as never)}
+                style={[styles.compareButton, { backgroundColor: theme.secondary }]}
+              >
+                <Feather 
+                  name="git-branch" 
+                  size={16} 
+                  color="#FFFFFF" 
+                />
+                <ThemedText 
+                  type="caption" 
+                  style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "600", marginLeft: 4 }}
+                >
+                  Compare
+                </ThemedText>
+              </Pressable>
+              <Pressable
+                onPress={() => setViewMode(viewMode === 'card' ? 'list' : 'card')}
+                style={[styles.viewToggleButton, { backgroundColor: '#c484ffff' }]}
+              >
+                <Feather 
+                  name={viewMode === 'card' ? 'list' : 'grid'} 
+                  size={18} 
+                  color="#FFFFFF" 
+                />
+              </Pressable>
+            </View>
+          </View>
+          
+          <View style={[styles.searchBar, { backgroundColor: theme.inputBackground, borderColor: '#9333EA' }]}>
+            <Feather name="search" size={20} color={theme.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.text }]}
+              placeholder="Search gemstones..."
+              placeholderTextColor={theme.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery ? (
+              <Pressable onPress={() => setSearchQuery("")}>
+                <Feather name="x" size={20} color={theme.textSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
+          
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryContainer}
+          >
+            {GEM_CATEGORIES.map(category => (
+              <Pressable
+                key={category}
+                onPress={() => {
+                  setSelectedCategory(category);
+                  if (category === 'Semi-precious') {
+                    setShowSemiPreciousFilters(true);
+                  } else {
+                    setShowSemiPreciousFilters(false);
+                  }
+                }}
+                style={[
+                  styles.categoryChip,
+                  {
+                    backgroundColor: selectedCategory === category 
+                      ? '#9333EA' 
+                      : theme.inputBackground,
+                    borderColor: '#9333EA',
+                  }
+                ]}
+              >
+                <ThemedText 
+                  type="small"
+                  style={{ 
+                    color: selectedCategory === category ? "#FFFFFF" : theme.text 
+                  }}
+                >
+                  {category}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </ScrollView>
+          
+          {/* Semi-precious Filters */}
+          {showSemiPreciousFilters && selectedCategory === 'Semi-precious' && (
+            <View style={[styles.semiPreciousFiltersContainer, { backgroundColor: theme.backgroundSecondary }]}>
+              <View style={styles.filterButtonsRow}>
+                <Pressable
+                  onPress={() => setShowColorModal(true)}
+                  style={[
+                    styles.filterButton,
+                    { 
+                      backgroundColor: selectedSemiPreciousColors.length > 0 
+                        ? theme.primary 
+                        : theme.inputBackground,
+                      borderColor: theme.border,
+                    }
+                  ]}
+                >
+                  <Feather 
+                    name="droplet" 
+                    size={12} 
+                    color={selectedSemiPreciousColors.length > 0 ? "#FFFFFF" : theme.textSecondary} 
+                  />
+                  <ThemedText 
+                    type="caption"
+                    style={{ 
+                      color: selectedSemiPreciousColors.length > 0 ? "#FFFFFF" : theme.text,
+                      marginLeft: Spacing.xs,
+                      fontSize: 10,
+                    }}
+                  >
+                    Colors {selectedSemiPreciousColors.length > 0 && `(${selectedSemiPreciousColors.length})`}
+                  </ThemedText>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setShowHardnessModal(true)}
+                  style={[
+                    styles.filterButton,
+                    { 
+                      backgroundColor: selectedSemiPreciousHardness !== 'All' 
+                        ? theme.primary 
+                        : theme.inputBackground,
+                      borderColor: theme.border,
+                    }
+                  ]}
+                >
+                  <Feather 
+                    name="shield" 
+                    size={12} 
+                    color={selectedSemiPreciousHardness !== 'All' ? "#FFFFFF" : theme.textSecondary} 
+                  />
+                  <ThemedText 
+                    type="caption"
+                    style={{ 
+                      color: selectedSemiPreciousHardness !== 'All' ? "#FFFFFF" : theme.text,
+                      marginLeft: Spacing.xs,
+                      fontSize: 10,
+                    }}
+                  >
+                    Hardness {selectedSemiPreciousHardness !== 'All' && `(${selectedSemiPreciousHardness})`}
+                  </ThemedText>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setShowTransparencyModal(true)}
+                  style={[
+                    styles.filterButton,
+                    { 
+                      backgroundColor: selectedSemiPreciousTransparency !== 'All' 
+                        ? theme.primary 
+                        : theme.inputBackground,
+                      borderColor: theme.border,
+                    }
+                  ]}
+                >
+                  <Feather 
+                    name="eye" 
+                    size={12} 
+                    color={selectedSemiPreciousTransparency !== 'All' ? "#FFFFFF" : theme.textSecondary} 
+                  />
+                  <ThemedText 
+                    type="caption"
+                    style={{ 
+                      color: selectedSemiPreciousTransparency !== 'All' ? "#FFFFFF" : theme.text,
+                      marginLeft: Spacing.xs,
+                      fontSize: 10,
+                    }}
+                  >
+                    Transparency {selectedSemiPreciousTransparency !== 'All' && `(${selectedSemiPreciousTransparency})`}
+                  </ThemedText>
+                </Pressable>
+              </View>
+              
+              {(selectedSemiPreciousColors.length > 0 || selectedSemiPreciousHardness !== 'All' || selectedSemiPreciousTransparency !== 'All') && (
+                <Pressable
+                  onPress={() => {
+                    setSelectedSemiPreciousColors([]);
+                    setSelectedSemiPreciousHardness('All');
+                    setSelectedSemiPreciousTransparency('All');
+                  }}
+                  style={styles.clearFiltersButton}
+                >
+                  <Feather name="x" size={16} color={theme.primary} />
+                  <ThemedText type="small" style={[styles.clearFiltersText, { color: theme.primary }]}>
+                    Clear Filters
+                  </ThemedText>
+                </Pressable>
+              )}
+            </View>
+          )}
+        </View>
+
+        <FlatList
+          data={filteredGems}
+          keyExtractor={item => item.id}
+          renderItem={renderGemItem}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingBottom: (paddingBottom || 0) + 80 }
+          ]}
+          scrollIndicatorInsets={{ bottom: scrollInsetBottom }}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
+          refreshing={isLoadingGems}
+          onRefresh={loadGemstones}
+          ListEmptyComponent={() => (
+            <View style={styles.emptyState}>
+              {isLoadingGems ? (
+                <>
+                  <ThemedText type="body" style={{ color: theme.textSecondary, marginTop: Spacing.md }}>
+                    Loading gemstones...
+                  </ThemedText>
+                </>
+              ) : (
+                <>
+              <Feather name="search" size={48} color={theme.textSecondary} />
+              <ThemedText type="body" style={{ color: theme.textSecondary, marginTop: Spacing.md }}>
+                No gemstones found
+              </ThemedText>
+                </>
+              )}
+            </View>
+          )}
+        />
+
+        {/* Floating Action Button */}
+        <Pressable
+          onPress={() => setShowAddStoneModal(true)}
+          style={({ pressed }) => [
+            styles.fab,
+            {
+              backgroundColor: theme.primary,
+              opacity: pressed ? 0.8 : 1,
+              transform: [{ scale: pressed ? 0.95 : 1 }],
+            }
+          ]}
+        >
+          <Feather name="plus" size={28} color="#FFFFFF" />
+        </Pressable>
+      </View>
+
+      <Modal
+        visible={selectedGem !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setSelectedGem(null)}
+      >
+        {selectedGem ? (
+          <ThemedView style={styles.modalContainer}>
+            {/* Enhanced Header with Gradient */}
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+              <Pressable
+                onPress={() => setSelectedGem(null)}
+                style={({ pressed }) => [
+                  styles.backButton,
+                  { backgroundColor: theme.backgroundSecondary, opacity: pressed ? 0.6 : 1 }
+                ]}
+              >
+                <Feather name="x" size={20} color={theme.text} />
+              </Pressable>
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <ThemedText type="h4" style={{ fontWeight: '700' }}>
+                  {selectedGem.variety}
+                </ThemedText>
+                <ThemedText type="caption" style={{ color: theme.textSecondary, marginTop: 2 }}>
+                  {selectedGem.indianName}
+                </ThemedText>
+              </View>
+              <View style={{ flexDirection: 'row', gap: Spacing.xs }}>
+                {/* Check if this is a custom gemstone - check if it exists in customStones array */}
+                {selectedGem.id && customStones.some(stone => stone.id === selectedGem.id) && (
+                  <>
+                    <Pressable
+                      onPress={() => {
+                        setSelectedGem(null);
+                        setEditingGemstone(selectedGem);
+                        setShowAddStoneModal(true);
+                      }}
+                      style={({ pressed }) => [
+                        styles.backButton,
+                        { backgroundColor: theme.primary + "20", opacity: pressed ? 0.6 : 1 }
+                      ]}
+                    >
+                      <Feather name="edit-2" size={18} color={theme.primary} />
+                    </Pressable>
+                    <Pressable
+                      onPress={async () => {
+                        Alert.alert(
+                          "Delete Gemstone",
+                          `Are you sure you want to delete ${selectedGem.variety}?`,
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Delete",
+                              style: "destructive",
+                              onPress: async () => {
+                                if (!selectedGem.id) return;
+                                
+                                // Delete from database
+                                const result = await deleteCustomGemstone(selectedGem.id);
+                                
+                                if (result.success) {
+                                  // Also remove from AsyncStorage local storage
+                                  try {
+                                    const storedStones = await AsyncStorage.getItem('customStones');
+                                    if (storedStones) {
+                                      const stones = JSON.parse(storedStones);
+                                      const updatedStones = stones.filter((stone: any) => stone.id !== selectedGem.id);
+                                      await AsyncStorage.setItem('customStones', JSON.stringify(updatedStones));
+                                      
+                                      // Update local state immediately
+                                      setCustomStones(prevStones => prevStones.filter(stone => stone.id !== selectedGem.id));
+                                    }
+                                  } catch (storageError) {
+                                    console.log('Error removing from AsyncStorage:', storageError);
+                                  }
+                                  
+                                  // Reload from database to ensure sync
+                                  await loadGemstones();
+                                  setSelectedGem(null);
+                                  Alert.alert("Success", "Gemstone deleted successfully from database and local storage");
+                                } else {
+                                  Alert.alert("Error", result.error || "Failed to delete gemstone");
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }}
+                      style={({ pressed }) => [
+                        styles.backButton,
+                        { backgroundColor: theme.danger + "20", opacity: pressed ? 0.6 : 1 }
+                      ]}
+                    >
+                      <Feather name="trash-2" size={18} color={theme.danger} />
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            </View>
+
+            {/* Enhanced Hero Section with Image - Modern Design */}
+            <Animated.View 
+              style={[
+                styles.heroSection,
+                { 
+                  height: headerHeight,
+                  overflow: 'hidden',
+                  backgroundColor: selectedGem.image ? 'transparent' : theme.backgroundSecondary,
+                  opacity: heroSectionOpacity,
+                }
+              ]}
+            >
+              {selectedGem.image ? (
+                <Animated.View 
+                  style={[
+                    styles.heroImageContainer,
+                    {
+                      transform: [
+                        { scale: heroImageScale },
+                        { translateX: heroImageTranslateX },
+                        { translateY: heroImageTranslateY }
+                      ],
+                      opacity: heroImageOpacity,
+                    }
+                  ]}
+                >
+                  <ExpoImage
+                    source={{ uri: selectedGem.image }}
+                    style={styles.heroImage}
+                    contentFit="cover"
+                    transition={500}
+                  />
+                  <Animated.View 
+                    style={[
+                      styles.imageOverlay, 
+                      { 
+                        backgroundColor: getGemColor(selectedGem.colors?.[0]) + "15",
+                        opacity: scrollY.interpolate({
+                          inputRange: [0, 150],
+                          outputRange: [0.2, 0.5],
+                          extrapolate: 'clamp',
+                        })
+                      }
+                    ]} 
+                  />
+                </Animated.View>
+              ) : (
+                <Animated.View 
+                  style={[
+                    styles.heroIconContainer, 
+                    { 
+                      backgroundColor: getGemColor(selectedGem.colors?.[0]) + "15",
+                      transform: [
+                        { scale: heroImageScale },
+                        { translateX: heroImageTranslateX },
+                        { translateY: heroImageTranslateY }
+                      ],
+                      opacity: heroImageOpacity,
+                    }
+                  ]}
+                >
+                  <Feather 
+                    name="hexagon" 
+                    size={120} 
+                    color={getGemColor(selectedGem.colors?.[0])} 
+                  />
+                </Animated.View>
+              )}
+              
+              {/* Enhanced Floating Info Card with Better Stability */}
+              <Animated.View 
+                style={[
+                  styles.modernHeroInfo,
+                  {
+                    transform: [
+                      { scale: titleScale },
+                      { translateY: titleTranslateY },
+                      { translateX: titleTranslateX }
+                    ],
+                    opacity: titleOpacity,
+                    backgroundColor: selectedGem.image 
+                      ? 'rgba(0,0,0,0.6)' 
+                      : theme.backgroundDefault,
+                    // backdropFilter: selectedGem.image ? 'blur(10px)' : 'none', // Commented out due to TS error
+                  }
+                ]}
+              >
+                <View style={styles.heroInfoContent}>
+                  <View style={styles.titleRow}>
+                    <ThemedText 
+                      type="h2" 
+                      style={[
+                        styles.heroTitle, 
+                        { 
+                          color: selectedGem.image ? "#FFFFFF" : theme.text,
+                          // textShadow: selectedGem.image ? '0 2px 4px rgba(0,0,0,0.3)' : 'none' // Commented out due to TS error
+                        }
+                      ]}
+                    >
+                      {selectedGem.variety}
+                    </ThemedText>
+                    {selectedGem.indianName && (
+                      <ThemedText 
+                        type="body" 
+                        style={[
+                          styles.heroSubtitle, 
+                          { 
+                            color: selectedGem.image ? "#FFFFFF" : theme.textSecondary,
+                            opacity: selectedGem.image ? 0.9 : 0.8
+                          }
+                        ]}
+                      >
+                        {" ("}{selectedGem.indianName}{")"}
+                      </ThemedText>
+                    )}
+                  </View>
+                  
+                  <View style={styles.heroBadges}>
+                    <View 
+                      style={[
+                        styles.heroBadge, 
+                        { 
+                          backgroundColor: selectedGem.category === "Precious" 
+                            ? theme.secondary 
+                            : selectedGem.category === "Semi-precious"
+                              ? theme.primary
+                              : theme.success
+                        }
+                      ]}
+                    >
+                      <Feather name="award" size={14} color="#FFFFFF" />
+                      <ThemedText type="caption" style={{ color: "#FFFFFF", marginLeft: 6, fontWeight: '600' }}>
+                        {selectedGem.category}
+                      </ThemedText>
+                    </View>
+                    {selectedGem.hardness > 0 && (
+                      <View 
+                        style={[
+                          styles.heroBadge, 
+                          styles.heroBadgeSecondary, 
+                          { 
+                            backgroundColor: selectedGem.image 
+                              ? 'rgba(255,255,255,0.25)' 
+                              : theme.backgroundSecondary,
+                            borderColor: selectedGem.image 
+                              ? 'rgba(255,255,255,0.3)' 
+                              : theme.border
+                          }
+                        ]}
+                      >
+                        <Feather 
+                          name="shield" 
+                          size={14} 
+                          color={selectedGem.image ? "#FFFFFF" : theme.text} 
+                        />
+                        <ThemedText 
+                          type="caption" 
+                          style={{ 
+                            color: selectedGem.image ? "#FFFFFF" : theme.text, 
+                            marginLeft: 6, 
+                            fontWeight: '600' 
+                          }}
+                        >
+                          {selectedGem.hardness} Mohs
+                        </ThemedText>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </Animated.View>
+            </Animated.View>
+
+            {/* Compact Header - 50x50 image with horizontal layout */}
+            <Animated.View 
+              style={[
+                styles.compactHeader,
+                {
+                  opacity: compactHeaderOpacity,
+                  transform: [{ translateY: compactHeaderTranslateY }],
+                  backgroundColor: theme.backgroundDefault,
+                  borderBottomColor: theme.border,
+                }
+              ]}
+            >
+              <View style={styles.compactHeaderContent}>
+                {/* 50x50 Stone Image */}
+                <View style={styles.compactImageContainer}>
+                  {selectedGem.image ? (
+                    <ExpoImage
+                      source={{ uri: selectedGem.image }}
+                      style={styles.compactImage}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                  ) : (
+                    <View 
+                      style={[
+                        styles.compactImagePlaceholder,
+                        { backgroundColor: getGemColor(selectedGem.colors?.[0]) + "20" }
+                      ]}
+                    >
+                      <Feather 
+                        name="hexagon" 
+                        size={24} 
+                        color={getGemColor(selectedGem.colors?.[0])} 
+                      />
+                    </View>
+                  )}
+                </View>
+
+                {/* Stone Name and Info in Horizontal Stack */}
+                <View style={styles.compactInfo}>
+                  <View style={styles.compactTitleRow}>
+                    <ThemedText type="h4" style={[styles.compactTitle, { color: theme.text }]}>
+                      {selectedGem.variety}
+                    </ThemedText>
+                    {selectedGem.indianName && (
+                      <ThemedText type="caption" style={[styles.compactSubtitle, { color: theme.textSecondary }]}>
+                        {selectedGem.indianName}
+                      </ThemedText>
+                    )}
+                  </View>
+                  
+                  <View style={styles.compactBadges}>
+                    <View 
+                      style={[
+                        styles.compactBadge, 
+                        { 
+                          backgroundColor: selectedGem.category === "Precious" 
+                            ? theme.secondary 
+                            : selectedGem.category === "Semi-precious"
+                              ? theme.primary
+                              : theme.success
+                        }
+                      ]}
+                    >
+                      <ThemedText type="caption" style={{ color: "#FFFFFF", fontSize: 10, fontWeight: '600' }}>
+                        {selectedGem.category}
+                      </ThemedText>
+                    </View>
+                    {selectedGem.hardness > 0 && (
+                      <View 
+                        style={[
+                          styles.compactBadge, 
+                          { backgroundColor: theme.backgroundSecondary, borderColor: theme.border }
+                        ]}
+                      >
+                        <ThemedText type="caption" style={{ color: theme.text, fontSize: 10, fontWeight: '600' }}>
+                          {selectedGem.hardness} Mohs
+                        </ThemedText>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </View>
+            </Animated.View>
+
+            {/* Enhanced Tab Container */}
+            <View style={[styles.tabContainer, { borderBottomColor: theme.border }]}>
+              {(["properties", "formation", "market", "testing", "buying"] as const).map(tab => (
+                <Pressable
+                  key={tab}
+                  onPress={() => setActiveTab(tab)}
+                  style={[
+                    styles.tab,
+                    activeTab === tab && { 
+                      borderBottomColor: theme.primary, 
+                      borderBottomWidth: 3,
+                      backgroundColor: theme.primary + "05"
+                    }
+                  ]}
+                >
+                  <ThemedText 
+                    type="small"
+                    style={{ 
+                      color: activeTab === tab ? theme.primary : theme.textSecondary,
+                      fontWeight: activeTab === tab ? "700" : "500",
+                      fontSize: activeTab === tab ? 14 : 13,
+                    }}
+                  >
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+
+            <Animated.ScrollView 
+              style={styles.tabContent} 
+              contentContainerStyle={styles.tabContentInner}
+              showsVerticalScrollIndicator={false}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                { useNativeDriver: false }
+              )}
+              scrollEventThrottle={16}
+            >
+              {activeTab === "properties" && (
+                <>
+                  {/* Key Properties Card */}
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      KEY PROPERTIES
+                    </ThemedText>
+                    <View style={styles.propertyGrid}>
+                      <View style={[styles.propertyItem, { backgroundColor: theme.primary + "10" }]}>
+                        <Feather name="eye" size={18} color={theme.primary} />
+                        <View style={styles.propertyContent}>
+                          <ThemedText type="caption" style={[styles.propertyLabel, { color: theme.textSecondary }]}>
+                            Refractive Index (RI)
+                          </ThemedText>
+                          <ThemedText type="h4" style={{ color: theme.primary, fontWeight: '700' }}>
+                            {selectedGem.riMin} - {selectedGem.riMax}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <View style={[styles.propertyItem, { backgroundColor: theme.success + "10" }]}>
+                        <Feather name="activity" size={18} color={theme.success} />
+                        <View style={styles.propertyContent}>
+                          <ThemedText type="caption" style={[styles.propertyLabel, { color: theme.textSecondary }]}>
+                            Specific Gravity (SG)
+                          </ThemedText>
+                          <ThemedText type="h4" style={{ color: theme.success, fontWeight: '700' }}>
+                            {selectedGem.sgMin} - {selectedGem.sgMax}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <View style={[styles.propertyItem, { backgroundColor: theme.secondary + "10" }]}>
+                        <Feather name="hard-drive" size={18} color={theme.secondary} />
+                        <View style={styles.propertyContent}>
+                          <ThemedText type="caption" style={[styles.propertyLabel, { color: theme.textSecondary }]}>
+                            Hardness
+                          </ThemedText>
+                          <ThemedText type="h4" style={{ color: theme.secondary, fontWeight: '700' }}>
+                            {selectedGem.hardness} Mohs
+                          </ThemedText>
+                        </View>
+                      </View>
+                    </View>
+                  </Card>
+
+                  {/* Detailed Properties */}
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      DETAILED PROPERTIES
+                    </ThemedText>
+                  <DataRow label="Chemical Composition" value={selectedGem.chemicalComposition} />
+                  <DataRow label="Crystal System" value={selectedGem.crystalSystem} />
+                  <DataRow label="Luster" value={selectedGem.luster} />
+                  <DataRow label="Cleavage" value={selectedGem.cleavage} />
+                  <DataRow label="Fracture" value={selectedGem.fracture} />
+                  <DataRow label="Optic Character" value={selectedGem.opticCharacter} />
+                  <DataRow label="Pleochroism" value={selectedGem.pleochroism} />
+                  <DataRow label="UV Response" value={selectedGem.uvResponse} />
+                  </Card>
+                  
+                  {/* Colors Card */}
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    COLORS
+                  </ThemedText>
+                  <View style={styles.chipContainer}>
+                    {(Array.isArray(selectedGem.colors)
+                      ? selectedGem.colors
+                      : selectedGem.colors
+                      ? [selectedGem.colors]
+                      : []).map((color, idx) => (
+                        <View 
+                          key={idx} 
+                          style={[
+                            styles.chip, 
+                            { 
+                              backgroundColor: theme.backgroundSecondary,
+                              borderWidth: 1.5,
+                              borderColor: theme.border,
+                            }
+                          ]}
+                        >
+                          <View 
+                            style={[
+                              styles.colorIndicator, 
+                              { backgroundColor: getGemColor(color) }
+                            ]} 
+                          />
+                          <ThemedText type="caption" style={{ fontWeight: '600' }}>{color}</ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                  </Card>
+
+                  {/* Color Analysis Card */}
+                  {selectedGem.image && (
+                    <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                      <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                        IMAGE COLOR ANALYSIS
+                      </ThemedText>
+                      
+                      {isAnalyzingColor ? (
+                        <View style={styles.colorAnalysisLoading}>
+                          <Feather name="loader" size={20} color={theme.primary} />
+                          <ThemedText type="caption" style={styles.colorAnalysisText}>
+                            Analyzing colors...
+                          </ThemedText>
+                        </View>
+                      ) : colorAnalysis ? (
+                        <View style={styles.colorAnalysisResults}>
+                          <View style={styles.colorAnalysisRow}>
+                            <ThemedText type="caption" style={styles.colorAnalysisLabel}>Dominant:</ThemedText>
+                            <View style={styles.colorAnalysisValue}>
+                              <View style={[styles.colorSwatch, { backgroundColor: colorAnalysis.dominant }]} />
+                              <ThemedText type="caption">{colorAnalysis.dominant}</ThemedText>
+                            </View>
+                          </View>
+                          
+                          {colorAnalysis.vibrant && (
+                            <View style={styles.colorAnalysisRow}>
+                              <ThemedText type="caption" style={styles.colorAnalysisLabel}>Vibrant:</ThemedText>
+                              <View style={styles.colorAnalysisValue}>
+                                <View style={[styles.colorSwatch, { backgroundColor: colorAnalysis.vibrant }]} />
+                                <ThemedText type="caption">{colorAnalysis.vibrant}</ThemedText>
+                              </View>
+                            </View>
+                          )}
+                          
+                          {colorAnalysis.lightVibrant && (
+                            <View style={styles.colorAnalysisRow}>
+                              <ThemedText type="caption" style={styles.colorAnalysisLabel}>Light Vibrant:</ThemedText>
+                              <View style={styles.colorAnalysisValue}>
+                                <View style={[styles.colorSwatch, { backgroundColor: colorAnalysis.lightVibrant }]} />
+                                <ThemedText type="caption">{colorAnalysis.lightVibrant}</ThemedText>
+                              </View>
+                            </View>
+                          )}
+                          
+                          {colorAnalysis.darkVibrant && (
+                            <View style={styles.colorAnalysisRow}>
+                              <ThemedText type="caption" style={styles.colorAnalysisLabel}>Dark Vibrant:</ThemedText>
+                              <View style={styles.colorAnalysisValue}>
+                                <View style={[styles.colorSwatch, { backgroundColor: colorAnalysis.darkVibrant }]} />
+                                <ThemedText type="caption">{colorAnalysis.darkVibrant}</ThemedText>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      ) : (
+                        <View style={styles.colorAnalysisEmpty}>
+                          <Feather name="image" size={20} color={theme.textSecondary} />
+                          <ThemedText type="caption" style={styles.colorAnalysisText}>
+                            No color analysis available
+                          </ThemedText>
+                        </View>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Inclusions Card */}
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    TYPICAL INCLUSIONS
+                  </ThemedText>
+                  <View style={styles.chipContainer}>
+                    {selectedGem.inclusions.map((inclusion, idx) => (
+                        <View 
+                          key={idx} 
+                          style={[
+                            styles.chip, 
+                            { 
+                              backgroundColor: theme.backgroundSecondary,
+                              borderWidth: 1.5,
+                              borderColor: theme.border,
+                            }
+                          ]}
+                        >
+                          <Feather name="circle" size={8} color={theme.primary} style={{ marginRight: 6 }} />
+                          <ThemedText type="caption" style={{ fontWeight: '600' }}>{inclusion}</ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                  </Card>
+
+                  {/* Inclusion Images Card */}
+                  {selectedGem.inclusionImages && selectedGem.inclusionImages.length > 0 && (
+                    <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                      <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                        INCLUSION IMAGES
+                      </ThemedText>
+                      <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.inclusionImagesContainer}
+                      >
+                        {selectedGem.inclusionImages.map((imgUrl, idx) => (
+                          <View key={idx} style={[styles.inclusionImageWrapper, { borderColor: theme.border }]}>
+                            <ExpoImage
+                              source={{ uri: imgUrl }}
+                              style={styles.inclusionImage}
+                              contentFit="cover"
+                              transition={200}
+                            />
+                            <View style={[styles.imageLabel, { backgroundColor: theme.backgroundSecondary }]}>
+                              <ThemedText type="caption" style={{ color: theme.textSecondary, fontSize: 11 }}>
+                                Inclusion {idx + 1}
+                              </ThemedText>
+                            </View>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    </Card>
+                  )}
+                </>
+              )}
+
+              {activeTab === "formation" && (
+                <>
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      GEOLOGICAL FORMATION
+                    </ThemedText>
+                    <ThemedText type="body" style={{ lineHeight: 24, color: theme.text }}>
+                      {selectedGem.formation}
+                    </ThemedText>
+                  </Card>
+
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    OCCURRENCES
+                  </ThemedText>
+                    <View style={styles.locationsContainer}>
+                  {selectedGem.occurrences.map((location, idx) => (
+                        <View 
+                          key={idx} 
+                          style={[
+                            styles.locationRow, 
+                            { 
+                              backgroundColor: theme.backgroundSecondary,
+                              borderLeftWidth: 3,
+                              borderLeftColor: theme.primary,
+                            }
+                          ]}
+                        >
+                          <Feather name="map-pin" size={18} color={theme.primary} />
+                          <ThemedText type="body" style={{ fontWeight: '500', flex: 1 }}>
+                            {location}
+                          </ThemedText>
+                    </View>
+                  ))}
+                    </View>
+                  </Card>
+                </>
+              )}
+
+              {activeTab === "market" && (
+                <>
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      PRICE RANGE (PER CARAT)
+                    </ThemedText>
+                    <View style={styles.priceRow}>
+                      <View style={[styles.priceItem, { backgroundColor: theme.success + "15" }]}>
+                        <View style={styles.priceHeader}>
+                          <Feather name="dollar-sign" size={18} color={theme.success} />
+                          <ThemedText type="caption" style={{ color: theme.textSecondary, fontWeight: '700', marginLeft: 6 }}>
+                            INR
+                        </ThemedText>
+                      </View>
+                        <ThemedText type="h3" style={{ color: theme.success, fontWeight: '800', marginTop: Spacing.xs }}>
+                          ₹{selectedGem.priceRangeINR.min.toLocaleString()} - ₹{selectedGem.priceRangeINR.max.toLocaleString()}
+                        </ThemedText>
+                      </View>
+                      <View style={[styles.priceItem, { backgroundColor: theme.primary + "15" }]}>
+                        <View style={styles.priceHeader}>
+                          <Feather name="dollar-sign" size={18} color={theme.primary} />
+                          <ThemedText type="caption" style={{ color: theme.textSecondary, fontWeight: '700', marginLeft: 6 }}>
+                            USD
+                          </ThemedText>
+                        </View>
+                        <ThemedText type="h3" style={{ color: theme.primary, fontWeight: '800', marginTop: Spacing.xs }}>
+                          ${selectedGem.priceRangeUSD.min} - ${selectedGem.priceRangeUSD.max}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </Card>
+
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                      MARKET DEMAND
+                    </ThemedText>
+                    <View style={[
+                      styles.demandBadge,
+                      { 
+                        backgroundColor: selectedGem.marketDemand === "High" ? theme.success + "20" :
+                          selectedGem.marketDemand === "Medium" ? theme.warning + "20" : theme.textSecondary + "20"
+                      }
+                    ]}>
+                      <Feather 
+                        name={selectedGem.marketDemand === "High" ? "trending-up" : selectedGem.marketDemand === "Medium" ? "minus" : "trending-down"} 
+                        size={20} 
+                        color={
+                      selectedGem.marketDemand === "High" ? theme.success :
+                      selectedGem.marketDemand === "Medium" ? theme.warning : theme.textSecondary
+                    }
+                  />
+                      <ThemedText 
+                        type="h4" 
+                        style={{ 
+                          color: selectedGem.marketDemand === "High" ? theme.success :
+                            selectedGem.marketDemand === "Medium" ? theme.warning : theme.textSecondary,
+                          fontWeight: '700',
+                          marginLeft: Spacing.sm
+                        }}
+                      >
+                        {selectedGem.marketDemand}
+                      </ThemedText>
+                    </View>
+                  </Card>
+
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    COMMON TREATMENTS
+                  </ThemedText>
+                  <View style={styles.chipContainer}>
+                    {selectedGem.treatments.map((treatment, idx) => (
+                        <View 
+                          key={idx} 
+                          style={[
+                            styles.chip, 
+                            { 
+                              backgroundColor: theme.warning + "15",
+                              borderWidth: 1.5,
+                              borderColor: theme.warning + "40",
+                            }
+                          ]}
+                        >
+                          <Feather name="alert-triangle" size={12} color={theme.warning} style={{ marginRight: 6 }} />
+                          <ThemedText type="caption" style={{ color: theme.warning, fontWeight: '600' }}>
+                            {treatment}
+                          </ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                  </Card>
+
+                  <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                    <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    KNOWN SIMULANTS
+                  </ThemedText>
+                  <View style={styles.chipContainer}>
+                    {selectedGem.simulants.map((simulant, idx) => (
+                        <View 
+                          key={idx} 
+                          style={[
+                            styles.chip, 
+                            { 
+                              backgroundColor: theme.danger + "15",
+                              borderWidth: 1.5,
+                              borderColor: theme.danger + "40",
+                            }
+                          ]}
+                        >
+                          <Feather name="alert-circle" size={12} color={theme.danger} style={{ marginRight: 6 }} />
+                          <ThemedText type="caption" style={{ color: theme.danger, fontWeight: '600' }}>
+                            {simulant}
+                          </ThemedText>
+                      </View>
+                    ))}
+                  </View>
+                  </Card>
+                </>
+              )}
+
+              {activeTab === "testing" && (
+                <Card style={[styles.propertyCard, { backgroundColor: theme.backgroundDefault }]}>
+                  <ThemedText type="caption" style={[styles.cardSectionTitle, { color: theme.textSecondary }]}>
+                    TESTING GUIDE
+                  </ThemedText>
+                  <ThemedText type="body" style={{ marginBottom: Spacing.xl, color: theme.textSecondary, lineHeight: 22 }}>
+                    Follow these steps to manually identify this gemstone:
+                  </ThemedText>
+                  {selectedGem.testingGuide.map((step, idx) => (
+                    <View key={idx} style={styles.testStep}>
+                      <View style={[styles.stepNumber, { backgroundColor: theme.primary }]}>
+                        <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700", fontSize: 13 }}>
+                          {idx + 1}
+                        </ThemedText>
+                      </View>
+                      <View style={[styles.stepContent, { backgroundColor: theme.backgroundSecondary }]}>
+                        <ThemedText type="body" style={[styles.stepText, { color: theme.text }]}>
+                          {step}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  ))}
+                </Card>
+              )}
+
+              {activeTab === "buying" && (
+                <BuyingGuideContent gemstone={selectedGem!} theme={theme} />
+              )}
+            </Animated.ScrollView>
+          </ThemedView>
+        ) : null}
+      </Modal>
+
+      {/* Color Filter Modal */}
+      <Modal
+        visible={showColorModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowColorModal(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+            <Pressable onPress={() => setShowColorModal(false)}>
+              <Feather name="x" size={24} color={theme.text} />
+            </Pressable>
+            <ThemedText type="h4">Select Colors</ThemedText>
+            <Pressable onPress={() => setShowColorModal(false)}>
+              <ThemedText type="small" style={{ color: theme.primary }}>Done</ThemedText>
+            </Pressable>
+          </View>
+          
+          <ScrollView style={styles.modalScrollView}>
+            <View style={styles.modalContent}>
+              {['Red', 'Blue', 'Green', 'Yellow', 'Pink', 'Purple', 'Brown', 'Black', 'Colorless', 'Multicolor'].map(color => (
+                <Pressable
+                  key={color}
+                  onPress={() => {
+                    if (selectedSemiPreciousColors.includes(color)) {
+                      setSelectedSemiPreciousColors(prev => prev.filter(c => c !== color));
+                    } else {
+                      setSelectedSemiPreciousColors(prev => [...prev, color]);
+                    }
+                  }}
+                  style={[
+                    styles.filterListItem,
+                    { 
+                      backgroundColor: theme.backgroundDefault,
+                      borderBottomColor: theme.border,
+                    }
+                  ]}
+                >
+                  <View style={styles.filterListContent}>
+                    <ThemedText type="small" style={{ color: theme.text }}>
+                      {color}
+                    </ThemedText>
+                    <View style={[
+                      styles.filterCheckbox,
+                      { 
+                        borderColor: theme.border,
+                        backgroundColor: selectedSemiPreciousColors.includes(color) ? theme.primary : 'transparent',
+                      }
+                    ]}>
+                      {selectedSemiPreciousColors.includes(color) && (
+                        <Feather name="check" size={12} color="#FFFFFF" />
+                      )}
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Hardness Filter Modal */}
+      <Modal
+        visible={showHardnessModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowHardnessModal(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+            <Pressable onPress={() => setShowHardnessModal(false)}>
+              <Feather name="x" size={24} color={theme.text} />
+            </Pressable>
+            <ThemedText type="h4">Select Hardness</ThemedText>
+            <Pressable onPress={() => setShowHardnessModal(false)}>
+              <ThemedText type="small" style={{ color: theme.primary }}>Done</ThemedText>
+            </Pressable>
+          </View>
+          
+          <ScrollView style={styles.modalScrollView}>
+            <View style={styles.modalContent}>
+              {['All', 'Soft', 'Medium', 'Hard'].map(hardness => (
+                <Pressable
+                  key={hardness}
+                  onPress={() => setSelectedSemiPreciousHardness(hardness)}
+                  style={[
+                    styles.filterListItem,
+                    { 
+                      backgroundColor: theme.backgroundDefault,
+                      borderBottomColor: theme.border,
+                    }
+                  ]}
+                >
+                  <View style={styles.filterListContent}>
+                    <ThemedText type="small" style={{ color: theme.text }}>
+                      {hardness}
+                    </ThemedText>
+                    <View style={[
+                      styles.filterRadio,
+                      { 
+                        borderColor: theme.border,
+                        backgroundColor: selectedSemiPreciousHardness === hardness ? theme.primary : 'transparent',
+                      }
+                    ]}>
+                      {selectedSemiPreciousHardness === hardness && (
+                        <View style={[styles.radioInner, { backgroundColor: '#FFFFFF' }]} />
+                      )}
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Transparency Filter Modal */}
+      <Modal
+        visible={showTransparencyModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowTransparencyModal(false)}
+      >
+        <View style={[styles.modalContainer, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+            <Pressable onPress={() => setShowTransparencyModal(false)}>
+              <Feather name="x" size={24} color={theme.text} />
+            </Pressable>
+            <ThemedText type="h4">Select Transparency</ThemedText>
+            <Pressable onPress={() => setShowTransparencyModal(false)}>
+              <ThemedText type="small" style={{ color: theme.primary }}>Done</ThemedText>
+            </Pressable>
+          </View>
+          
+          <ScrollView style={styles.modalScrollView}>
+            <View style={styles.modalContent}>
+              {['All', 'Transparent', 'Translucent', 'Opaque'].map(transparency => (
+                <Pressable
+                  key={transparency}
+                  onPress={() => setSelectedSemiPreciousTransparency(transparency)}
+                  style={[
+                    styles.filterListItem,
+                    { 
+                      backgroundColor: theme.backgroundDefault,
+                      borderBottomColor: theme.border,
+                    }
+                  ]}
+                >
+                  <View style={styles.filterListContent}>
+                    <ThemedText type="small" style={{ color: theme.text }}>
+                      {transparency}
+                    </ThemedText>
+                    <View style={[
+                      styles.filterRadio,
+                      { 
+                        borderColor: theme.border,
+                        backgroundColor: selectedSemiPreciousTransparency === transparency ? theme.primary : 'transparent',
+                      }
+                    ]}>
+                      {selectedSemiPreciousTransparency === transparency && (
+                        <View style={[styles.radioInner, { backgroundColor: '#FFFFFF' }]} />
+                      )}
+                    </View>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <AddStoneModal
+        visible={showAddStoneModal}
+        editingGemstone={editingGemstone}
+        isUpdatingGemstone={isUpdatingGemstone}
+        onClose={() => {
+          setShowAddStoneModal(false);
+          setEditingGemstone(null);
+        }}
+        onSave={async (stoneData) => {
+          try {
+            // Helper function to extract value from FieldValue
+            const getValue = (field: FieldValue | null): string => {
+              return field?.value || "";
+            };
+
+            // Helper function to save locally
+            const saveLocally = async () => {
+              // Upload images to Supabase Storage first
+              let stoneImageUrl = stoneData.images?.stoneImages?.[0];
+              let inclusionImageUrls = stoneData.images?.inclusionImages || [];
+              
+              // Upload stone image if it's a local URI
+              if (stoneImageUrl && stoneImageUrl.startsWith("file://")) {
+                try {
+                  stoneImageUrl = await uploadGemstoneImage(stoneImageUrl, "stone");
+                } catch (error) {
+                  console.error("Failed to upload stone image:", error);
+                  stoneImageUrl = null;
+                }
+              }
+              
+              // Upload inclusion images if they are local URIs
+              const uploadedInclusionUrls: string[] = [];
+              for (const uri of inclusionImageUrls) {
+                if (uri.startsWith("file://")) {
+                  try {
+                    const uploadedUrl = await uploadGemstoneImage(uri, "inclusion");
+                    if (uploadedUrl) {
+                      uploadedInclusionUrls.push(uploadedUrl);
+                    }
+                  } catch (error) {
+                    console.error("Failed to upload inclusion image:", error);
+                  }
+                } else {
+                  uploadedInclusionUrls.push(uri);
+                }
+              }
+              // Convert the form data to Gemstone format
+              const newStone: Gemstone = {
+              id: `custom-${Date.now()}`,
+              variety: stoneData["Title"] || stoneData["Common Name"] || "Unknown",
+              chemicalComposition: stoneData["Chemical Formula"],
+              crystalSystem: stoneData["Crystal System"],
+              colors: stoneData["Colors"],
+              causeOfColor: stoneData["Species"],
+              transparency: stoneData["Transparency"] ? [stoneData["Transparency"]] : [],
+              luster: stoneData["Luster"],
+              hardness: parseFloat(stoneData["Hardness"]) || 0,
+              sgMin: parseFloat(stoneData["Specific Gravity"]?.split('-')[0]?.trim()) || parseFloat(stoneData["Specific Gravity"]) || 0,
+              sgMax: parseFloat(stoneData["Specific Gravity"]?.split('-')[1]?.trim()) || parseFloat(stoneData["Specific Gravity"]) || 0,
+              riMin: parseFloat(stoneData["Refractive Index"]?.split('-')[0]?.trim()) || parseFloat(stoneData["Refractive Index"]) || 0,
+              riMax: parseFloat(stoneData["Refractive Index"]?.split('-')[1]?.trim()) || parseFloat(stoneData["Refractive Index"]) || 0,
+              cleavage: "",
+              fracture: "",
+              opticCharacter: stoneData["Optic Character"],
+              pleochroism: stoneData["Pleochroism"],
+              inclusions: stoneData["Inclusions"] ? [stoneData["Inclusions"]] : [],
+              uvResponse: stoneData["Fluorescence"],
+              simulants: [],
+              treatments: [],
+              occurrences: stoneData["Occurences"],
+              indianName: "",
+              category: "Semi-precious",
+              priceRangeINR: { min: 0, max: 0 },
+              priceRangeUSD: { min: 0, max: 0 },
+              formation: "",
+              testingGuide: [],
+              marketDemand: "Medium",
+              image: stoneImageUrl,
+              inclusionImages: uploadedInclusionUrls,
+            };
+
+              const updatedStones = [...customStones, newStone];
+              setCustomStones(updatedStones);
+              await AsyncStorage.setItem('customStones', JSON.stringify(updatedStones));
+              setShowAddStoneModal(false);
+            };
+
+            // Convert to CustomGemstone format
+            const customGem: CustomGemstone = {
+              "Title": stoneData["Title"],
+              "Common Name": stoneData["Common Name"],
+              "Species": stoneData["Species"],
+              "Transparency": stoneData["Transparency"],
+              "Dispersion": stoneData["Dispersion"],
+              "Refractive Index": stoneData["Refractive Index"],
+              "Optic Character": stoneData["Optic Character"],
+              "Polariscope Reaction": stoneData["Polariscope Reaction"],
+              "Fluorescence": stoneData["Fluorescence"],
+              "Pleochroism": stoneData["Pleochroism"],
+              "Hardness": stoneData["Hardness"],
+              "Specific Gravity": stoneData["Specific Gravity"],
+              "Toughness": stoneData["Toughness"],
+              "Inclusions": stoneData["Inclusions"],
+              "Luster": stoneData["Luster"],
+              "Stability": stoneData["Stability"],
+              "Chemical Name": stoneData["Chemical Name"],
+              "Chemical Formula": stoneData["Chemical Formula"],
+              "Crystal System": stoneData["Crystal System"],
+              "Colors": stoneData["Colors"],
+              "Occurences": stoneData["Occurences"],
+              images: stoneData.images,
+            };
+
+            // Check if user is authenticated
+            if (!user) {
+              // User not authenticated - save locally and inform them
+              await saveLocally();
+              Alert.alert(
+                'Saved Locally',
+                'This gemstone has been saved locally on your device. Sign in from the Business Hub to enable cloud sync and access your gemstones across devices.',
+                [{ text: 'OK' }]
+              );
+              return;
+            }
+
+            // User is authenticated - try to save/update to Supabase
+            let result;
+            if (editingGemstone && editingGemstone.id) {
+              // Update existing gemstone
+              setIsUpdatingGemstone(true);
+              try {
+                result = await updateCustomGemstone(editingGemstone.id, customGem);
+                if (result?.success) {
+                  await loadGemstones();
+                  Alert.alert('Success', 'Gemstone updated successfully!');
+                  setShowAddStoneModal(false);
+                  setEditingGemstone(null);
+                  if (selectedGem?.id === editingGemstone.id) {
+                    setSelectedGem(null);
+                  }
+                  return;
+                }
+              } catch (error) {
+                console.error('Update error:', error);
+                Alert.alert('Error', 'Failed to update gemstone. Please try again.');
+              } finally {
+                setIsUpdatingGemstone(false);
+              }
+            } else {
+              // Create new gemstone
+              result = await saveCustomGemstone(customGem);
+              if (result?.success) {
+                // Reload gemstones from Supabase
+                await loadGemstones();
+                
+                Alert.alert('Success', 'Custom stone added successfully to the cloud!');
+                setShowAddStoneModal(false);
+                setEditingGemstone(null);
+                return;
+              }
+            }
+            
+            if (!result?.success) {
+              // Supabase save failed - offer to save locally
+              Alert.alert(
+                'Cloud Save Failed',
+                result?.error || 'Failed to save to cloud. Would you like to save locally instead?',
+                [
+                  {
+                    text: 'Cancel',
+                    style: 'cancel',
+                  },
+                  {
+                    text: 'Save Locally',
+                    onPress: async () => {
+                      await saveLocally();
+                    },
+                  },
+                ]
+              );
+            }
+          } catch (error) {
+            console.error('Error saving custom stone:', error);
+            Alert.alert('Error', 'Failed to save custom stone. Please try again.');
+          }
+        }}
+      />
+    </>
+  );
+}
+
+// Add Stone Modal Component
+interface StoneFormData {
+  "Title": string;
+  "Common Name": string;
+  "Species": string;
+  "Transparency": string;
+  "Dispersion": string;
+  "Refractive Index": string;
+  "Optic Character": string;
+  "Polariscope Reaction": string;
+  "Fluorescence": string;
+  "Pleochroism": string;
+  "Hardness": string;
+  "Specific Gravity": string;
+  "Toughness": string;
+  "Inclusions": string;
+  "Luster": string;
+  "Stability": string;
+  "Chemical Name": string;
+  "Chemical Formula": string;
+  "Crystal System": string;
+  "Colors": string[];
+  "Occurences": string[];
+  images: {
+    stoneImages: string[];
+    inclusionImages: string[];
+  };
+}
+
+  function AddStoneModal({
+  visible,
+  editingGemstone,
+  onClose,
+  onSave,
+  isUpdatingGemstone,
+}: {
+  visible: boolean;
+  editingGemstone?: Gemstone | null;
+  onClose: () => void;
+  onSave: (stoneData: any) => Promise<void>;
+  isUpdatingGemstone?: boolean;
+}) {
+  const { theme } = getThemeSafe();
+  
+  // Initialize form data from editingGemstone if provided
+  const getInitialFormData = (): StoneFormData => {
+    if (editingGemstone) {
+      // Convert Gemstone to StoneFormData
+      return {
+        "Title": editingGemstone.variety,
+        "Common Name": editingGemstone.variety,
+        "Species": editingGemstone.causeOfColor,
+        "Transparency": editingGemstone.transparency[0] || "",
+        "Dispersion": "",
+        "Refractive Index": `${editingGemstone.riMin} - ${editingGemstone.riMax}`,
+        "Optic Character": editingGemstone.opticCharacter,
+        "Polariscope Reaction": "",
+        "Fluorescence": editingGemstone.uvResponse,
+        "Pleochroism": editingGemstone.pleochroism,
+        "Hardness": editingGemstone.hardness.toString(),
+        "Specific Gravity": `${editingGemstone.sgMin} - ${editingGemstone.sgMax}`,
+        "Toughness": "",
+        "Inclusions": editingGemstone.inclusions.join(", "),
+        "Luster": editingGemstone.luster,
+        "Stability": "",
+        "Chemical Name": "",
+        "Chemical Formula": editingGemstone.chemicalComposition,
+        "Crystal System": editingGemstone.crystalSystem,
+        "Colors": editingGemstone.colors,
+        "Occurences": editingGemstone.occurrences,
+        images: {
+          stoneImages: editingGemstone.image ? [editingGemstone.image] : [],
+          inclusionImages: editingGemstone.inclusionImages || [],
+        },
+      };
+    }
+    // Default empty form
+    return {
+      "Title": "",
+      "Common Name": "",
+      "Species": "",
+      "Transparency": "",
+      "Dispersion": "",
+      "Refractive Index": "",
+      "Optic Character": "",
+      "Polariscope Reaction": "",
+      "Fluorescence": "",
+      "Pleochroism": "",
+      "Hardness": "",
+      "Specific Gravity": "",
+      "Toughness": "",
+      "Inclusions": "",
+      "Luster": "",
+      "Stability": "",
+      "Chemical Name": "",
+      "Chemical Formula": "",
+      "Crystal System": "",
+      "Colors": [],
+      "Occurences": [],
+      images: {
+        stoneImages: [],
+        inclusionImages: [],
+      },
+    };
+  };
+
+  // Initialize form data - use function to avoid calling on every render
+  const [formData, setFormData] = useState<StoneFormData>(() => getInitialFormData());
+  
+  // Reset form when editingGemstone or visible changes
+  useEffect(() => {
+    if (visible) {
+      setFormData(getInitialFormData());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editingGemstone?.id, editingGemstone?.variety]);
+
+  const pickStoneImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission Required', 'Please grant camera roll permissions to add images');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({ 
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+      quality: 0.8,
+      allowsMultipleSelection: true,
+    });
+    if (!res.canceled && res.assets?.length) {
+      const uris = res.assets.map(asset => asset.uri);
+      setFormData({
+        ...formData,
+        images: {
+          ...formData.images,
+          stoneImages: [...formData.images.stoneImages, ...uris]
+        }
+      });
+    }
+  };
+
+  const pickInclusionImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission Required', 'Please grant camera roll permissions to add images');
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({ 
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+      quality: 0.8,
+      allowsMultipleSelection: true,
+    });
+    if (!res.canceled && res.assets?.length) {
+      const uris = res.assets.map(asset => asset.uri);
+      setFormData({
+        ...formData,
+        images: {
+          ...formData.images,
+          inclusionImages: [...formData.images.inclusionImages, ...uris]
+        }
+      });
+    }
+  };
+
+  const removeStoneImage = (index: number) => {
+    setFormData({
+      ...formData,
+      images: {
+        ...formData.images,
+        stoneImages: formData.images.stoneImages.filter((_, i) => i !== index)
+      }
+    });
+  };
+
+  const removeInclusionImage = (index: number) => {
+    setFormData({
+      ...formData,
+      images: {
+        ...formData.images,
+        inclusionImages: formData.images.inclusionImages.filter((_, i) => i !== index)
+      }
+    });
+  };
+
+  const handleSave = () => {
+    if (!formData["Title"]) {
+      Alert.alert('Error', 'Please enter a title');
+      return;
+    }
+    onSave(formData);
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <ThemedView style={styles.modalContainer}>
+        <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+          <ThemedText type="h4" style={{ fontWeight: '700' }}>
+            {editingGemstone ? 'Edit Gemstone' : 'Add Custom Stone'}
+          </ThemedText>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.backButton,
+              { backgroundColor: theme.backgroundSecondary, opacity: pressed ? 0.6 : 1 }
+            ]}
+          >
+            <Feather name="x" size={20} color={theme.text} />
+          </Pressable>
+        </View>
+
+        <ScrollView 
+          style={styles.modalScrollView}
+          contentContainerStyle={styles.modalScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <ThemedText type="caption" style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+            BASIC INFORMATION
+          </ThemedText>
+          <Input
+            label="Title"
+            placeholder="e.g., Ruby"
+            value={formData["Title"]}
+            onChangeText={(val) => setFormData({ ...formData, "Title": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Common Name"
+            placeholder="e.g., Manik"
+            value={formData["Common Name"]}
+            onChangeText={(val) => setFormData({ ...formData, "Common Name": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Species"
+            placeholder="e.g., Corundum"
+            value={formData["Species"]}
+            onChangeText={(val) => setFormData({ ...formData, "Species": val })}
+          />
+          <View style={styles.formSpacer} />
+
+          <ThemedText type="caption" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
+            PHYSICAL PROPERTIES
+          </ThemedText>
+          <Input
+            label="Transparency"
+            placeholder="e.g., Transparent"
+            value={formData["Transparency"]}
+            onChangeText={(val) => setFormData({ ...formData, "Transparency": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Dispersion"
+            placeholder="e.g., 0.018"
+            value={formData["Dispersion"]}
+            onChangeText={(val) => setFormData({ ...formData, "Dispersion": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Refractive Index"
+            placeholder="e.g., 1.76 - 1.78"
+            value={formData["Refractive Index"]}
+            onChangeText={(val) => setFormData({ ...formData, "Refractive Index": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Optic Character"
+            placeholder="e.g., DR"
+            value={formData["Optic Character"]}
+            onChangeText={(val) => setFormData({ ...formData, "Optic Character": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Polariscope Reaction"
+            placeholder="e.g., DR"
+            value={formData["Polariscope Reaction"]}
+            onChangeText={(val) => setFormData({ ...formData, "Polariscope Reaction": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Fluorescence"
+            placeholder="e.g., Strong red fluorescence"
+            value={formData["Fluorescence"]}
+            onChangeText={(val) => setFormData({ ...formData, "Fluorescence": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Pleochroism"
+            placeholder="e.g., Strong"
+            value={formData["Pleochroism"]}
+            onChangeText={(val) => setFormData({ ...formData, "Pleochroism": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Hardness"
+            placeholder="e.g., 9"
+            value={formData["Hardness"]}
+            onChangeText={(val) => setFormData({ ...formData, "Hardness": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Specific Gravity"
+            placeholder="e.g., 3.97 - 4.05"
+            value={formData["Specific Gravity"]}
+            onChangeText={(val) => setFormData({ ...formData, "Specific Gravity": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Toughness"
+            placeholder="e.g., Good"
+            value={formData["Toughness"]}
+            onChangeText={(val) => setFormData({ ...formData, "Toughness": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Inclusions"
+            placeholder="e.g., Silk, rutile"
+            value={formData["Inclusions"]}
+            onChangeText={(val) => setFormData({ ...formData, "Inclusions": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Luster"
+            placeholder="e.g., Vitreous"
+            value={formData["Luster"]}
+            onChangeText={(val) => setFormData({ ...formData, "Luster": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Stability"
+            placeholder="e.g., Stable"
+            value={formData["Stability"]}
+            onChangeText={(val) => setFormData({ ...formData, "Stability": val })}
+          />
+          <View style={styles.formSpacer} />
+
+          <ThemedText type="caption" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
+            CHEMICAL PROPERTIES
+          </ThemedText>
+          <Input
+            label="Chemical Name"
+            placeholder="e.g., Aluminum Oxide"
+            value={formData["Chemical Name"]}
+            onChangeText={(val) => setFormData({ ...formData, "Chemical Name": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Chemical Formula"
+            placeholder="e.g., Al2O3"
+            value={formData["Chemical Formula"]}
+            onChangeText={(val) => setFormData({ ...formData, "Chemical Formula": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Crystal System"
+            placeholder="e.g., Trigonal"
+            value={formData["Crystal System"]}
+            onChangeText={(val) => setFormData({ ...formData, "Crystal System": val })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Colors (comma-separated)"
+            placeholder="e.g., Red, Pink, Orange"
+            value={formData["Colors"].join(", ")}
+            onChangeText={(val) => setFormData({ ...formData, "Colors": val.split(",").map(c => c.trim()).filter(c => c) })}
+          />
+          <View style={styles.formSpacer} />
+          <Input
+            label="Occurences (comma-separated)"
+            placeholder="e.g., Myanmar, Sri Lanka, Thailand"
+            value={formData["Occurences"].join(", ")}
+            onChangeText={(val) => setFormData({ ...formData, "Occurences": val.split(",").map(c => c.trim()).filter(c => c) })}
+          />
+
+          <ThemedText type="caption" style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.xl }]}>
+            IMAGES
+          </ThemedText>
+          <Button
+            onPress={pickStoneImage}
+            variant="outline"
+            style={{ marginBottom: Spacing.md }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+              <Feather name="image" size={18} color={theme.primary} />
+              <ThemedText type="body" style={{ color: theme.primary, fontWeight: '600' }}>
+                Add Stone Images
+              </ThemedText>
+            </View>
+          </Button>
+          {formData.images.stoneImages.length > 0 ? (
+            <View style={styles.imageGrid}>
+              {formData.images.stoneImages.map((uri, index) => (
+                <View key={`stone-image-${Date.now()}-${index}`} style={styles.imagePreviewContainer}>
+                  <ExpoImage
+                    source={{ uri }}
+                    style={styles.imagePreview}
+                    contentFit="cover"
+                  />
+                  <Pressable
+                    onPress={() => removeStoneImage(index)}
+                    style={styles.removeImageButton}
+                  >
+                    <Feather name="x" size={16} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Card style={[styles.emptyImagePlaceholder, { backgroundColor: theme.backgroundSecondary, borderColor: theme.border }]}>
+              <Feather name="image" size={40} color={theme.textSecondary} />
+              <ThemedText type="caption" style={{ color: theme.textSecondary, marginTop: Spacing.md, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                No Stone Images Added Yet
+              </ThemedText>
+            </Card>
+          )}
+
+          <View style={styles.formSpacer} />
+          <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.sm, fontWeight: '600' }}>
+            Inclusion Images
+          </ThemedText>
+          <Button
+            onPress={pickInclusionImage}
+            variant="outline"
+            style={{ marginBottom: Spacing.md }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.xs }}>
+              <Feather name="image" size={18} color={theme.primary} />
+              <ThemedText type="body" style={{ color: theme.primary, fontWeight: '600' }}>
+                Add Inclusion Images
+              </ThemedText>
+            </View>
+          </Button>
+          {formData.images.inclusionImages.length > 0 ? (
+            <View style={styles.imageGrid}>
+              {formData.images.inclusionImages.map((uri, index) => (
+                <View key={`inclusion-image-${Date.now()}-${index}`} style={styles.imagePreviewContainer}>
+                  <ExpoImage
+                    source={{ uri }}
+                    style={styles.imagePreview}
+                    contentFit="cover"
+                  />
+                  <Pressable
+                    onPress={() => removeInclusionImage(index)}
+                    style={styles.removeImageButton}
+                  >
+                    <Feather name="x" size={16} color="#FFFFFF" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Card style={[styles.emptyImagePlaceholder, { backgroundColor: theme.backgroundSecondary, borderColor: theme.border }]}>
+              <Feather name="image" size={40} color={theme.textSecondary} />
+              <ThemedText type="caption" style={{ color: theme.textSecondary, marginTop: Spacing.md, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                No Inclusion Images Added Yet
+              </ThemedText>
+            </Card>
+          )}
+
+          <View style={styles.formSpacer} />
+          <View style={styles.formSpacer} />
+          <View style={styles.formSpacer} />
+          <Button
+            onPress={handleSave}
+            variant="primary"
+            style={{ marginBottom: Spacing.xl }}
+            disabled={isUpdatingGemstone || false}
+          >
+            {(isUpdatingGemstone || false) ? 'Updating...' : (editingGemstone ? 'Update Stone' : 'Save Stone')}
+          </Button>
+        </ScrollView>
+      </ThemedView>
+    </Modal>
+  );
+}
+
+function DataRow({ 
+  label, 
+  value, 
+  mono = false,
+  valueColor,
+}: { 
+  label: string; 
+  value: string; 
+  mono?: boolean;
+  valueColor?: string;
+}) {
+  const { theme } = getThemeSafe();
+  
+  return (
+    <View style={styles.dataRow}>
+      <ThemedText 
+        type="small" 
+        style={{ 
+          color: theme.textSecondary, 
+          flex: 1,
+          fontWeight: '600',
+        }}
+      >
+        {label}
+      </ThemedText>
+      <ThemedText 
+        type={mono ? "mono" : "body"}
+        style={[
+          valueColor ? { color: valueColor } : { color: theme.text },
+          { flex: 1.5, textAlign: 'right' }
+        ]}
+      >
+        {value}
+      </ThemedText>
+    </View>
+  );
+}
+
+function getGemColor(color?: string): string {
+  if (!color || color === 'undefined' || color === 'null') {
+    return "#6B46C1"; // Default color
+  }
+  
+  const colorMap: Record<string, string> = {
+    "Red": "#EF4444",
+    "Pink": "#EC4899",
+    "Orange": "#F97316",
+    "Yellow": "#EAB308",
+    "Green": "#22C55E",
+    "Blue": "#3B82F6",
+    "Purple": "#8B5CF6",
+    "Violet": "#8B5CF6",
+    "Brown": "#A16207",
+    "Black": "#1F2937",
+    "White": "#9CA3AF",
+    "Colorless": "#9CA3AF",
+    "Gray": "#6B7280",
+  };
+  
+  try {
+    for (const [key, val] of Object.entries(colorMap)) {
+      if (color.toLowerCase().includes(key.toLowerCase())) {
+        return val;
+      }
+    }
+  } catch (error) {
+    // If any error occurs during string processing, return default color
+    console.warn('Error processing color:', color, error);
+  }
+  return "#6B46C1";
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  searchContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.md,
+  },
+  headerContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: Spacing.md,
+  },
+  headerButtons: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    alignItems: "center",
+  },
+  compareButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  headerTitle: {
+    flex: 1,
+  },
+  viewToggleButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.lg,
+    height: 52,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+    borderWidth: 2,
+    borderColor: '#9333EA',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+  },
+  categoryContainer: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  categoryChip: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.full,
+    borderWidth: 2,
+    borderColor: '#9333EA',
+  },
+  listContent: {
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing["4xl"],
+  },
+  gemCardWrapper: {
+    marginBottom: Spacing.md,
+  },
+  gemCard: {
+    padding: 0,
+    borderRadius: BorderRadius.xl,
+    overflow: "hidden",
+  },
+  gemCardContent: {
+    flexDirection: "row",
+    padding: Spacing.lg,
+    gap: Spacing.md,
+    position: 'relative',
+  },
+  thumbnailContainer: {
+    position: "relative",
+  },
+  gemThumbnail: {
+    width: 72,
+    height: 72,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: "transparent",
+  },
+  gemThumbnailPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderStyle: "dashed",
+  },
+  categoryBadgeAbsolute: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  categoryBadgeOverlay: {
+    position: "absolute",
+    bottom: Spacing.md,
+    left: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  gemInfo: {
+    flex: 1,
+    justifyContent: "space-between",
+    marginLeft: Spacing.md,
+  },
+  gemHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: Spacing.sm,
+  },
+  gemTitleContainer: {
+    flex: 1,
+  },
+  gemTitle: {
+    fontWeight: "700",
+    fontSize: 18,
+    marginBottom: 2,
+    letterSpacing: -0.3,
+  },
+  gemSubtitle: {
+    fontSize: 12,
+    fontWeight: "500",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  opticalSection: {
+    marginBottom: Spacing.sm,
+    paddingVertical: Spacing.xs,
+  },
+  opticalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  opticalItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+  },
+  opticalDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: "rgba(128,128,128,0.2)",
+  },
+  opticalLabel: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: "rgba(128,128,128,0.8)",
+    letterSpacing: 0.5,
+  },
+  opticalValue: {
+    fontSize: 11,
+    fontWeight: "600",
+    flex: 1,
+  },
+  propertiesRow: {
+    flexDirection: "row",
+    gap: Spacing.xs,
+    marginTop: Spacing.xs,
+  },
+  propertyBadge: {
+    flex: 1,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+  },
+  propertyLabel: {
+    fontSize: 9,
+    fontWeight: "600",
+    marginBottom: 2,
+    letterSpacing: 0.3,
+  },
+  propertyValue: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: Spacing["5xl"],
+  },
+  modalContainer: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: Spacing.lg,
+    borderBottomWidth: 1.5,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroSection: {
+    position: 'relative',
+  },
+  heroImageContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -140,
+    marginLeft: -140,
+    width: 280,
+    height: 280,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroIconContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -120,
+    marginLeft: -140,
+    width: 280,
+    height: 280,
+    borderRadius: BorderRadius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modernHeroInfo: {
+    position: 'absolute',
+    bottom: Spacing.lg,
+    left: 0,
+    right: 0,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    marginHorizontal: Spacing.lg,
+    padding: Spacing.lg,
+    minHeight: 120,
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  heroInfoContent: {
+    gap: Spacing.sm,
+  },
+  titleRow: {
+    marginBottom: Spacing.sm,
+  },
+  heroTitle: {
+    marginBottom: Spacing.xs,
+    textAlign: "left",
+    fontWeight: '700',
+    lineHeight: 32,
+  },
+  heroSubtitle: {
+    marginBottom: Spacing.sm,
+    textAlign: "left",
+    opacity: 0.9,
+    lineHeight: 20,
+  },
+  heroBadges: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    flexWrap: "wrap",
+  },
+  heroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+  },
+  heroBadgeSecondary: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  // Compact Header Styles
+  compactHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120, // Further reduced height to remove extra space
+    borderBottomWidth: 1,
+    borderBottomColor: '#9333EA',
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  compactHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20, // 20px spacing from left side
+    paddingVertical: Spacing.md,
+    height: '100%',
+    gap: 20, // 20px spacing between elements
+  },
+  compactImageContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    backgroundColor: '#F1F5F9', // Static color instead of theme reference
+  },
+  compactImage: {
+    width: '100%',
+    height: '100%',
+  },
+  compactImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.md,
+  },
+  compactInfo: {
+    width: '70%', // 70% width for text section (30:70 ratio)
+    justifyContent: 'center',
+    maxWidth: 200, // Max width constraint for text card view
+  },
+  compactTitleRow: {
+    marginBottom: 4,
+  },
+  compactTitle: {
+    fontWeight: '700',
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  compactSubtitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  compactBadges: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginTop: 6,
+  },
+  compactBadge: {
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    minWidth: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Buying Guide Styles
+  buyingGuideHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+  },
+  editButton: {
+    padding: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+  },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.sm,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12, // Changed to circular
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  checklistText: {
+    flex: 1,
+    lineHeight: 20,
+  },
+  addCheckSection: {
+    marginTop: Spacing.md,
+  },
+  addCheckInput: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    fontSize: 16,
+  },
+  guideSection: {
+    marginBottom: Spacing.xl,
+  },
+  identificationList: {
+    gap: Spacing.sm,
+  },
+  idPoint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+  },
+  priceGuide: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+  },
+  // Quick Optical Tests Styles
+  testSection: {
+    marginBottom: Spacing.xl,
+    paddingBottom: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128,128,128,0.1)',
+  },
+  testHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  testSteps: {
+    gap: Spacing.sm,
+  },
+  testStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.sm,
+  },
+  stepBullet: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.sm,
+    marginTop: 2,
+  },
+  inclusionGuide: {
+    gap: Spacing.md,
+    marginBottom: Spacing.lg,
+  },
+  inclusionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    backgroundColor: '#F8FAFC',
+    borderRadius: BorderRadius.md,
+    gap: Spacing.md,
+  },
+  inclusionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inclusionInfo: {
+    flex: 1,
+  },
+  inclusionImageSection: {
+    marginTop: Spacing.lg,
+  },
+  // Pricing Calculator Styles
+  calculatorSection: {
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  calculatorInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.sm,
+    fontSize: 16,
+  },
+  gradeSelector: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: Spacing.xs,
+  },
+  gradeButton: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+  },
+  calculateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.md,
+  },
+  priceResult: {
+    marginTop: Spacing.lg,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+  },
+  inclusionImagesContainer: {
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  inclusionImageWrapper: {
+    marginRight: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    overflow: "hidden",
+    borderWidth: 2,
+    position: "relative",
+  },
+  inclusionImage: {
+    width: 220,
+    height: 220,
+  },
+  imageLabel: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: Spacing.sm,
+    alignItems: "center",
+  },
+  tabContainer: {
+    flexDirection: "row",
+    borderBottomWidth: 1.5,
+    backgroundColor: "transparent",
+  },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.sm,
+    marginHorizontal: 2,
+  },
+  tabContent: {
+    flex: 1,
+  },
+  tabContentInner: {
+    padding: Spacing.xl,
+    paddingBottom: Spacing["5xl"],
+  },
+  propertyCard: {
+    marginBottom: Spacing.lg,
+    padding: Spacing.xl,
+    borderRadius: BorderRadius.lg,
+  },
+  cardSectionTitle: {
+    marginBottom: Spacing.lg,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  propertyGrid: {
+    flexDirection: "column",
+    gap: Spacing.md,
+  },
+  propertyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+  },
+  propertyContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  dataRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(128,128,128,0.1)",
+    gap: Spacing.md,
+  },
+  sectionLabel: {
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginTop: Spacing.lg,
+    marginBottom: Spacing.sm,
+  },
+  chipContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    marginRight: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  colorIndicator: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginRight: Spacing.sm,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  infoCard: {
+    marginBottom: Spacing.lg,
+  },
+  priceItem: {
+    flex: 1,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+  },
+  priceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: Spacing.xs,
+  },
+  demandBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    justifyContent: "center",
+  },
+  locationsContainer: {
+    gap: Spacing.sm,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+  },
+  stepNumber: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  stepContent: {
+    flex: 1,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  stepText: {
+    lineHeight: 22,
+  },
+  fab: {
+    position: "absolute",
+    bottom: Spacing.xl + 60,
+    right: Spacing.xl,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  modalScrollView: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    padding: Spacing.xl,
+    paddingBottom: Spacing["5xl"],
+  },
+  sectionTitle: {
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.md,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  formSpacer: {
+    height: Spacing.md,
+  },
+  formRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+  },
+  categorySelector: {
+    marginBottom: Spacing.md,
+  },
+  colorAnalysisLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+  },
+  colorAnalysisText: {
+    color: '#6B7280',
+  },
+  colorAnalysisResults: {
+    gap: Spacing.sm,
+  },
+  colorAnalysisRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+  },
+  colorAnalysisLabel: {
+    fontWeight: '600',
+    flex: 1,
+  },
+  colorAnalysisValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    flex: 2,
+  },
+  colorSwatch: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  colorAnalysisEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+  },
+  categoryButtons: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  categoryButton: {
+    flex: 1,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priceEntryCard: {
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.md,
+  },
+  priceEntryHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: Spacing.sm,
+  },
+  removeButton: {
+    padding: Spacing.xs,
+  },
+  imageGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  imagePreviewContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: BorderRadius.md,
+    overflow: "hidden",
+    position: "relative",
+  },
+  imagePreview: {
+    width: "100%",
+    height: "100%",
+  },
+  removeImageButton: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyImagePlaceholder: {
+    padding: Spacing.xl,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 120,
+    borderWidth: 2,
+    borderColor: "rgba(128,128,128,0.3)",
+  },
+  // List view styles
+  listItemWrapper: {
+    marginBottom: Spacing.sm,
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderBottomWidth: 1,
+  },
+  listItemImageContainer: {
+    width: 50,
+    height: 50,
+    marginRight: Spacing.md,
+  },
+  listItemImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: BorderRadius.sm,
+  },
+  listItemImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    borderRadius: BorderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listItemInfo: {
+    flex: 1,
+  },
+  listItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.xs,
+  },
+  listItemName: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  categoryBadge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+  },
+  listItemSubtitle: {
+    marginBottom: Spacing.xs,
+  },
+  semiPreciousFiltersContainer: {
+    padding: Spacing.md,
+    gap: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  filterSection: {
+    gap: Spacing.sm,
+  },
+  filterTitle: {
+    fontWeight: '600',
+    color: '#374151',
+  },
+  filterList: {
+    maxHeight: 120,
+  },
+  filterListItem: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderBottomWidth: 1,
+  },
+  filterListContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  filterCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  filterChipsContainer: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  filterChip: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+  },
+  clearFiltersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    alignSelf: 'flex-start',
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+  },
+  clearFiltersText: {
+    fontWeight: '500',
+  },
+  filterButtonsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 32,
+  },
+  modalContent: {
+    padding: Spacing.md,
+  },
+});

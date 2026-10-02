@@ -45,7 +45,7 @@ The entire app is now fully connected to Supabase! Here's what's been integrated
 ### Custom Gemstones
 1. User adds a custom gemstone via the "Add Stone" form
 2. Images are automatically uploaded to Supabase Storage
-3. Data is saved to `custom_gemstones` table
+3. Data is saved to `total_gemstones` table
 4. List automatically refreshes to show new gemstone
 
 ### Identification History
@@ -64,7 +64,7 @@ User Action → Service Function → Supabase → Database/Storage → UI Update
 - Row Level Security (RLS) enabled on all tables
 - Users can only see/modify their own data
 - Public gemstones are readable by everyone
-- Custom gemstones are user-specific
+- Total gemstones are user-specific
 
 ## 🚀 Next Steps (Optional)
 
@@ -78,7 +78,7 @@ User Action → Service Function → Supabase → Database/Storage → UI Update
 - The app works with or without Supabase configured
 - If Supabase is not set up, it falls back to AsyncStorage
 - All images are stored in Supabase Storage bucket `gemstone-images`
-- Custom gemstones are automatically synced across devices (when user is authenticated)
+- Total gemstones are automatically synced across devices (when user is authenticated)
 
 ## 🐛 Troubleshooting
 
@@ -87,6 +87,7 @@ If data isn't syncing:
 2. Verify the database schema has been run
 3. Check browser console for error messages
 4. Ensure user is authenticated (for user-specific data)
+
 
 
 

@@ -29,24 +29,25 @@ const springConfig: WithSpringConfig = {
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-export function Card({ 
-  elevation = 1, 
-  onPress, 
-  children, 
-  style, 
+export function Card({
+  elevation = 1,
+  onPress,
+  children,
+  style,
   disabled = false,
   variant = "default",
 }: CardProps) {
   const { theme } = useTheme();
   const scale = useSharedValue(1);
 
-  const cardBackgroundColor = variant === "outlined" 
-    ? theme.backgroundDefault 
-    : elevation === 1 
-      ? theme.backgroundDefault 
-      : elevation === 2 
-        ? theme.backgroundDefault 
-        : theme.backgroundSecondary;
+  const cardBackgroundColor =
+    variant === "outlined"
+      ? theme.backgroundDefault
+      : elevation === 1
+        ? theme.backgroundDefault
+        : elevation === 2
+          ? theme.backgroundDefault
+          : theme.backgroundSecondary;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],

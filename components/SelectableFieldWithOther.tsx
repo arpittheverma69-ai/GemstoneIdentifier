@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { StyleSheet, View, Pressable, Modal, FlatList, SafeAreaView } from "react-native";
+import {
+  StyleSheet,
+  View,
+  Pressable,
+  Modal,
+  FlatList,
+  SafeAreaView,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -48,7 +55,8 @@ export function SelectableFieldWithOther({
 
   const allOptions = [...options, "Other"];
 
-  const isOtherSelected = value?.source === "custom" || (value && !options.includes(value.value));
+  const isOtherSelected =
+    value?.source === "custom" || (value && !options.includes(value.value));
   const showCustomInput = isOtherSelected;
 
   const getDisplayValue = () => {
@@ -82,10 +90,13 @@ export function SelectableFieldWithOther({
 
   return (
     <View style={styles.container}>
-      <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>
+      <ThemedText
+        type="caption"
+        style={[styles.label, { color: theme.textSecondary }]}
+      >
         {label}
       </ThemedText>
-      
+
       <Pressable
         onPress={() => setIsOpen(true)}
         style={({ pressed }) => [
@@ -96,11 +107,11 @@ export function SelectableFieldWithOther({
           },
         ]}
       >
-        <ThemedText 
-          type="body" 
+        <ThemedText
+          type="body"
           style={[
             styles.triggerText,
-            !displayValue && { color: theme.textSecondary }
+            !displayValue && { color: theme.textSecondary },
           ]}
         >
           {displayValue || `Select ${label.toLowerCase()}...`}
@@ -125,10 +136,7 @@ export function SelectableFieldWithOther({
         animationType="fade"
         onRequestClose={() => setIsOpen(false)}
       >
-        <Pressable 
-          style={styles.overlay}
-          onPress={() => setIsOpen(false)}
-        >
+        <Pressable style={styles.overlay} onPress={() => setIsOpen(false)}>
           <SafeAreaView style={styles.modalContainer}>
             <ThemedView style={styles.modal}>
               <View style={styles.modalHeader}>
@@ -145,26 +153,29 @@ export function SelectableFieldWithOther({
                 keyExtractor={(item) => item}
                 style={styles.list}
                 renderItem={({ item }) => {
-                  const isSelected = item === "Other" 
-                    ? isOtherSelected 
-                    : displayValue === item;
+                  const isSelected =
+                    item === "Other" ? isOtherSelected : displayValue === item;
                   return (
                     <Pressable
                       onPress={() => handleSelect(item)}
                       style={({ pressed }) => [
                         styles.option,
                         {
-                          backgroundColor: isSelected 
-                            ? theme.primary + "20" 
-                            : pressed 
-                              ? theme.backgroundSecondary 
+                          backgroundColor: isSelected
+                            ? theme.primary + "20"
+                            : pressed
+                              ? theme.backgroundSecondary
                               : "transparent",
                         },
                       ]}
                     >
-                      <ThemedText 
+                      <ThemedText
                         type="body"
-                        style={isSelected ? { color: theme.primary, fontWeight: "600" } : undefined}
+                        style={
+                          isSelected
+                            ? { color: theme.primary, fontWeight: "600" }
+                            : undefined
+                        }
                       >
                         {item}
                       </ThemedText>
@@ -243,4 +254,3 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
 });
-

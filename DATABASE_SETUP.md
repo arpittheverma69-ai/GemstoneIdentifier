@@ -4,7 +4,7 @@
 
 1. **Database Connection**: App is connected to Supabase
 2. **Data Loading**: App loads gemstones from `public.gemstones` table
-3. **Add Stone Feature**: Add Stone modal saves to `custom_gemstones` table
+3. **Add Stone Feature**: Add Stone modal saves to `total_gemstones` table
 4. **Data Priority**: Database stones are shown first, local fallback second
 
 ## 🚀 Quick Start - Insert 2 Test Stones
@@ -38,7 +38,7 @@ node scripts/insert_2_test_stones.js
 - Anyone can read
 - Admin can write
 
-### `custom_gemstones` (User's custom stones)
+### `total_gemstones` (User's custom stones)
 - Stores user-created stones
 - `user_id` links to auth user
 - Only user can read/write their own
@@ -60,7 +60,7 @@ node scripts/insert_2_test_stones.js
    - Fill form and save
    - Should see success message
    - New stone should appear in list
-   - Check Supabase `custom_gemstones` table
+   - Check Supabase `total_gemstones` table
 
 ## 🐛 Troubleshooting
 
@@ -83,7 +83,7 @@ node scripts/insert_2_test_stones.js
 
 1. **`loadGemstones()`**: Now prioritizes database, adds logging
 2. **`allGems`**: Shows database stones first, local fallback
-3. **`saveCustomGemstone()`**: Already connected, saves to `custom_gemstones`
+3. **`saveCustomGemstone()`**: Already connected, saves to `total_gemstones`
 4. **Data conversion**: `convertDBGemstoneToApp()` handles database → app format
 
 ## ✅ Checklist
@@ -93,5 +93,6 @@ node scripts/insert_2_test_stones.js
 - [ ] Add Stone modal saves to database
 - [ ] Console shows database loading logs
 - [ ] Stones appear with all properties (RI, SG, Price)
+
 
 

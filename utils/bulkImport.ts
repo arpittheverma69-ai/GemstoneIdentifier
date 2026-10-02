@@ -1,4 +1,4 @@
-import { Gemstone } from '@/constants/gemstoneData';
+import { Gemstone, GemCategory, classifyGemCategory } from '@/constants/gemstoneData';
 import { saveCustomGemstone } from '@/services/gemstoneService';
 
 export interface BulkGemstoneData {
@@ -25,7 +25,7 @@ export interface BulkGemstoneData {
   treatments: string[];
   occurrences: string[];
   indianName: string;
-  category: "Precious" | "Semi-precious" | "Organic";
+  category: GemCategory;
   priceRangeINR: { min: number; max: number };
   priceRangeUSD: { min: number; max: number };
   formation: string;
@@ -48,7 +48,7 @@ export function validateBulkData(data: any[]): { isValid: boolean; errors: strin
     if (!item.hardness || item.hardness < 1 || item.hardness > 10) {
       errors.push(`Item ${index + 1}: Invalid hardness (must be 1-10)`);
     }
-    if (!["Precious", "Semi-precious", "Organic"].includes(item.category)) {
+    if (!["Precious", "Semi-precious", "Organic", "Others"].includes(item.category)) {
       errors.push(`Item ${index + 1}: Invalid category`);
     }
   });
@@ -64,56 +64,32 @@ export function validateBulkData(data: any[]): { isValid: boolean; errors: strin
  */
 export function convertToCustomGemstone(bulkData: BulkGemstoneData) {
   return {
-    stone_name: bulkData.variety,
-    variety: { value: bulkData.variety, label: bulkData.variety },
-    chemical_composition: bulkData.chemicalComposition,
-    crystal_system: { value: bulkData.crystalSystem, label: bulkData.crystalSystem },
-    color_range: bulkData.colors.join(", "),
-    cause_of_color: bulkData.causeOfColor,
-    transparency: { value: bulkData.transparency[0], label: bulkData.transparency[0] },
-    luster: { value: bulkData.luster, label: bulkData.luster },
-    hardness: bulkData.hardness.toString(),
-    specific_gravity: `${bulkData.sgMin}-${bulkData.sgMax}`,
-    refractive_index: `${bulkData.riMin}-${bulkData.riMax}`,
-    cleavage: bulkData.cleavage,
-    fracture: bulkData.fracture,
-    optic_character: { value: bulkData.opticCharacter, label: bulkData.opticCharacter },
-    pleochroism: { value: bulkData.pleochroism, label: bulkData.pleochroism },
-    typical_inclusions: bulkData.inclusions.join(", "),
-    uv_reaction: bulkData.uvResponse,
-    simulants: bulkData.simulants.join(", "),
-    common_treatments: bulkData.treatments.join(", "),
-    occurrences: bulkData.occurrences.join(", "),
-    indian_trade_name: bulkData.indianName,
-    category: bulkData.category,
-    formation: bulkData.formation,
+    "Title": bulkData.variety,
+    "Common Name": bulkData.variety,
+    "Species": bulkData.causeOfColor,
+    "Transparency": bulkData.transparency[0] || "",
+    "Dispersion": "",
+    "Refractive Index": `${bulkData.riMin}-${bulkData.riMax}`,
+    "Optic Character": bulkData.opticCharacter,
+    "Polariscope Reaction": "",
+    "Fluorescence": bulkData.uvResponse,
+    "Pleochroism": bulkData.pleochroism,
+    "Hardness": bulkData.hardness.toString(),
+    "Specific Gravity": `${bulkData.sgMin}-${bulkData.sgMax}`,
+    "Toughness": "",
+    "Inclusions": bulkData.inclusions.join(", "),
+    "Luster": bulkData.luster,
+    "Stability": "",
+    "Chemical Name": "",
+    "Chemical Formula": bulkData.chemicalComposition,
+    "Crystal System": bulkData.crystalSystem,
+    "Colors": bulkData.colors,
+    "Occurences": bulkData.occurrences,
+    "Tag": bulkData.category || "Precious",
     images: {
       stoneImages: bulkData.image ? [bulkData.image] : [],
       inclusionImages: bulkData.inclusionImages || []
     },
-    pricing: {
-      currency: "INR",
-      table: [{
-        grade: "AAA",
-        color: "",
-        clarity: null,
-        treatment: null,
-        pricePerCaratMin: bulkData.priceRangeINR.min,
-        pricePerCaratMax: bulkData.priceRangeINR.max,
-      }]
-    },
-    quick_facts: {
-      bestIdentifier: "",
-      easyConfusion: "",
-      marketDemand: bulkData.marketDemand.toLowerCase(),
-    },
-    id_rules: {
-      riRange: `${bulkData.riMin} - ${bulkData.riMax}`,
-      sgRange: `${bulkData.sgMin} - ${bulkData.sgMax}`,
-      colorClues: bulkData.colors.join(", "),
-      inclusionClues: bulkData.inclusions.join(", "),
-      treatmentClues: bulkData.treatments.join(", "),
-    }
   };
 }
 

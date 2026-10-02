@@ -9,6 +9,11 @@ export interface IdentificationResult {
     matchSG?: string;
     matchColor?: string;
     matchClarity?: string;
+    matchPolariscope?: string;
+    matchHardness?: string;
+    matchPleochroism?: string;
+    matchInclusions?: string;
+    matchOpticalCharacter?: string;
   };
   other_possible_stones: Array<{
     name: string;
@@ -153,6 +158,7 @@ export async function deleteIdentificationHistory(
     return { success: false, error: error.message || "Unknown error" };
   }
 }
+
 
 
 

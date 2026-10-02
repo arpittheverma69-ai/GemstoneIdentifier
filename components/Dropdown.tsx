@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import { 
-  StyleSheet, 
-  View, 
-  Pressable, 
-  Modal, 
+import {
+  StyleSheet,
+  View,
+  Pressable,
+  Modal,
   FlatList,
   SafeAreaView,
 } from "react-native";
@@ -22,12 +22,12 @@ interface DropdownProps {
   onSelect: (value: string) => void;
 }
 
-export function Dropdown({ 
-  label, 
-  placeholder = "Select...", 
-  value, 
-  options, 
-  onSelect 
+export function Dropdown({
+  label,
+  placeholder = "Select...",
+  value,
+  options,
+  onSelect,
 }: DropdownProps) {
   const { theme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
@@ -40,7 +40,10 @@ export function Dropdown({
   return (
     <View style={styles.container}>
       {label ? (
-        <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>
+        <ThemedText
+          type="caption"
+          style={[styles.label, { color: theme.textSecondary }]}
+        >
           {label}
         </ThemedText>
       ) : null}
@@ -54,12 +57,9 @@ export function Dropdown({
           },
         ]}
       >
-        <ThemedText 
-          type="body" 
-          style={[
-            styles.triggerText,
-            !value && { color: theme.textSecondary }
-          ]}
+        <ThemedText
+          type="body"
+          style={[styles.triggerText, !value && { color: theme.textSecondary }]}
         >
           {value || placeholder}
         </ThemedText>
@@ -72,10 +72,7 @@ export function Dropdown({
         animationType="fade"
         onRequestClose={() => setIsOpen(false)}
       >
-        <Pressable 
-          style={styles.overlay}
-          onPress={() => setIsOpen(false)}
-        >
+        <Pressable style={styles.overlay} onPress={() => setIsOpen(false)}>
           <SafeAreaView style={styles.modalContainer}>
             <ThemedView style={styles.modal}>
               <View style={styles.modalHeader}>
@@ -89,33 +86,54 @@ export function Dropdown({
               </View>
               <FlatList
                 data={options}
-                keyExtractor={(item) => item}
+                keyExtractor={(item: any, index: number) => {
+                  // Handle both string and object options
+                  if (typeof item === "string") {
+                    return item;
+                  } else if (typeof item === "object" && item !== null) {
+                    return item.value || item.label || `option-${index}`;
+                  }
+                  return `option-${index}`;
+                }}
                 style={styles.list}
-                renderItem={({ item }) => (
-                  <Pressable
-                    onPress={() => handleSelect(item)}
-                    style={({ pressed }) => [
-                      styles.option,
-                      {
-                        backgroundColor: value === item 
-                          ? theme.primary + "20" 
-                          : pressed 
-                            ? theme.backgroundSecondary 
-                            : "transparent",
-                      },
-                    ]}
-                  >
-                    <ThemedText 
-                      type="body"
-                      style={value === item ? { color: theme.primary } : undefined}
+                renderItem={({ item }: { item: any }) => {
+                  // Extract display value for both string and object options
+                  const displayValue =
+                    typeof item === "string"
+                      ? item
+                      : item?.label || item?.value || String(item);
+
+                  return (
+                    <Pressable
+                      onPress={() => handleSelect(displayValue)}
+                      style={({ pressed }) => [
+                        styles.option,
+                        {
+                          backgroundColor:
+                            value === displayValue
+                              ? theme.primary + "20"
+                              : pressed
+                                ? theme.backgroundSecondary
+                                : "transparent",
+                        },
+                      ]}
                     >
-                      {item}
-                    </ThemedText>
-                    {value === item ? (
-                      <Feather name="check" size={20} color={theme.primary} />
-                    ) : null}
-                  </Pressable>
-                )}
+                      <ThemedText
+                        type="body"
+                        style={
+                          value === displayValue
+                            ? { color: theme.primary }
+                            : undefined
+                        }
+                      >
+                        {displayValue}
+                      </ThemedText>
+                      {value === displayValue ? (
+                        <Feather name="check" size={20} color={theme.primary} />
+                      ) : null}
+                    </Pressable>
+                  );
+                }}
               />
             </ThemedView>
           </SafeAreaView>

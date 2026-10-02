@@ -115,12 +115,13 @@ After inserting the stones:
 4. **Verify**:
    - Success message appears
    - New stone appears in the list
-   - Stone is saved to `custom_gemstones` table in Supabase
+   - Stone is saved to `total_gemstones` table in Supabase
 
 ## Troubleshooting
 
 - **No stones showing?** Check console logs for database connection errors
 - **Add stone not working?** Verify you're logged in (custom stones require authentication)
 - **Database connection issues?** Check your Supabase URL and API key in `app.json` or `.env`
+
 
 

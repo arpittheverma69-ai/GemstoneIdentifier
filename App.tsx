@@ -33,7 +33,12 @@ function AppContent() {
 
   return (
     <NavigationContainer>
-      {user ? <MainTabNavigator /> : <AuthNavigator />}
+      {user ? (
+        // User exists - go directly to main app
+        <MainTabNavigator />
+      ) : (
+        <AuthNavigator />
+      )}
     </NavigationContainer>
   );
 }

@@ -1,3 +1,5 @@
+export type GemCategory = "Precious" | "Semi-precious" | "Organic" | "Others";
+
 export interface Gemstone {
   id: string;
   variety: string;
@@ -15,6 +17,7 @@ export interface Gemstone {
   cleavage: string;
   fracture: string;
   opticCharacter: string;
+  toughness?: string;
   pleochroism: string;
   inclusions: string[];
   uvResponse: string;
@@ -22,7 +25,7 @@ export interface Gemstone {
   treatments: string[];
   occurrences: string[];
   indianName: string;
-  category: "Precious" | "Semi-precious" | "Organic";
+  category: GemCategory;
   priceRangeINR: { min: number; max: number };
   priceRangeUSD: { min: number; max: number };
   formation: string;
@@ -30,6 +33,11 @@ export interface Gemstone {
   marketDemand: "High" | "Medium" | "Low";
   image?: string; // Main gemstone image URL
   inclusionImages?: string[]; // Array of inclusion image URLs
+  spectroscopeImages?: string[]; // Array of spectroscope image URLs
+  user_id?: string; // User ID for identifying editable stones
+  polariscopeReaction?: string; // e.g., "DR", "AGG", "Doubly Refractive (DR)"
+  stability?: string; // e.g., "Stable", "Sensitive to heat"
+  dispersion?: string; // Dispersion value
 }
 
 export const GEMSTONE_DATABASE: Gemstone[] = [
@@ -785,7 +793,214 @@ export const GEMSTONE_DATABASE: Gemstone[] = [
   }
 ];
 
-export const GEM_CATEGORIES = ["All", "Precious", "Semi-precious", "Organic"] as const;
+export const GEM_CATEGORIES = ["All", "Precious", "Semi-precious", "Organic", "Others"] as const;
+
+const PRECIOUS_EXACT_NAMES = new Set([
+  "alexandrite",
+  "diamond",
+  "emerald",
+  "padparadscha sapphire",
+  "ruby",
+  "sapphire",
+]);
+
+const ORGANIC_EXACT_NAMES = new Set([
+  "abalone shell",
+  "amber",
+  "ammolite",
+  "ammonite shell",
+  "capiz shell",
+  "copal",
+  "coral",
+  "ivory",
+  "jet",
+  "pearl",
+  "shell",
+  "mother of pearl",
+  "mother-of-pearl",
+  "operculum",
+  "petrified wood",
+]);
+
+const SEMI_PRECIOUS_EXACT_NAMES = new Set([
+  "achroite", "adularia", "agate", "amazonite", "amethyst", "ametrine", "andalusite",
+  "apatite", "aquamarine", "aventurine quartz", "azurite", "azurmalachite",
+  "beryl", "bixbite", "bloodstone", "bytownite", "carnelian", "chalcedony", "charoite",
+  "chrome diopside", "chrome tourmaline", "chrysoberyl", "chrysocolla", "chrysoprase",
+  "citrine", "demantoid", "diaspore", "diopside", "drusy quartz", "dumortierite",
+  "elbaite", "fire opal", "fluorite", "garnet", "goshenite", "grossularite",
+  "heliodor", "hematite", "hessonite", "hiddenite", "howlite", "indicolite",
+  "iolite", "jade", "jadeite", "jasper", "kunzite", "kyanite", "labradorite",
+  "lapis lazuli", "larimar", "lepidolite", "madeira citrine", "malachite",
+  "moonstone", "morganite", "nephrite", "obsidian", "onyx", "opal",
+  "peridot", "pietersite", "prase", "prasiolite", "prehnite", "pyrite",
+  "pyrope", "quartz", "rainbow moonstone", "red beryl", "rhodochrosite", "rhodolite",
+  "rhodonite", "rose quartz", "rubellite", "ruby-zoisite", "rutilated quartz",
+  "sard", "scapolite", "serpentine", "smoky quartz", "sodalite", "spectrolite",
+  "spessartite", "sphene", "spinel", "spodumene", "sugilite", "sunstone",
+  "tanzanite", "tigers eye", "titanite", "topaz", "tourmaline", "tsavorite",
+  "turquoise", "unakite", "uvarovite", "variscite", "verdelite", "zircon", "zoisite"
+]);
+
+/**
+ * Robustly classifies any gemstone record into one of the 4 standard categories:
+ * "Precious" | "Semi-precious" | "Organic" | "Others"
+ */
+export function classifyGemCategory(gem: any): GemCategory {
+  if (!gem) return "Others";
+
+  const variety = (gem.variety || gem.Title || gem.name || gem["Common Name"] || gem.indianName || "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  const species = (gem.Species || gem.causeOfColor || gem.species || "")
+    .toString()
+    .toLowerCase()
+    .trim();
+  const rawTag = (gem.Tag || gem.category || gem.Category || "")
+    .toString()
+    .trim();
+  const chemFormula = (gem["Chemical Formula"] || gem.chemicalComposition || "")
+    .toString()
+    .toLowerCase();
+  const chemName = (gem["Chemical Name"] || "")
+    .toString()
+    .toLowerCase();
+
+  // 1. Precious Check
+  if (
+    PRECIOUS_EXACT_NAMES.has(variety) ||
+    variety.includes("diamond") ||
+    (variety.includes("ruby") && variety !== "ruby-zoisite") ||
+    variety.includes("sapphire") ||
+    variety.includes("emerald") ||
+    variety.includes("alexandrite") ||
+    variety.includes("paraiba") ||
+    variety.includes("paraíba")
+  ) {
+    return "Precious";
+  }
+
+  // 2. Organic Check
+  if (
+    ORGANIC_EXACT_NAMES.has(variety) ||
+    species === "organic" ||
+    species === "shell" ||
+    species === "fossil" ||
+    /\b(shell|amber|pearl|coral|ivory|ammolite|copal|jet)\b/i.test(variety) ||
+    chemFormula.includes("organic") ||
+    chemName.includes("organic") ||
+    chemFormula.includes("conchiolin") ||
+    chemName.includes("conchiolin") ||
+    chemFormula.includes("succinite")
+  ) {
+    return "Organic";
+  }
+
+  // 3. Semi-precious Check
+  if (
+    SEMI_PRECIOUS_EXACT_NAMES.has(variety) ||
+    species === "quartz" ||
+    species === "tourmaline" ||
+    species === "garnet" ||
+    species === "beryl" ||
+    species === "feldspar" ||
+    species === "spinel" ||
+    species === "topaz" ||
+    species === "opal" ||
+    species === "chrysoberyl" ||
+    species === "spodumene" ||
+    species === "zircon" ||
+    species === "olivine" ||
+    species === "zoisite" ||
+    species === "jade" ||
+    species === "jadeite" ||
+    species === "nephrite" ||
+    species === "turquoise" ||
+    species === "lapis lazuli" ||
+    species === "iolite" ||
+    species === "malachite" ||
+    species === "diopside" ||
+    species === "kyanite" ||
+    species === "apatite" ||
+    species === "fluorite" ||
+    species === "pyrite" ||
+    species === "hematite"
+  ) {
+    return "Semi-precious";
+  }
+
+  // 4. Check explicit tag if manually assigned by user
+  const rawTagLower = rawTag.toLowerCase();
+  if (rawTagLower === "precious") return "Precious";
+  if (rawTagLower === "organic") return "Organic";
+  if (rawTagLower === "semi-precious" || rawTagLower === "semiprecious" || rawTagLower === "semi precious") {
+    return "Semi-precious";
+  }
+  if (rawTagLower === "others" || rawTagLower === "other") return "Others";
+
+  // 5. Default fallback
+  return "Others";
+}
+
+/**
+ * Returns numeric sorting rank for gemstone categories:
+ * Precious (0) -> Semi-precious (1) -> Organic (2) -> Others (3)
+ */
+export function getCategoryRank(category: GemCategory | string): number {
+  const norm = (category || "").toLowerCase().trim();
+  if (norm === "precious") return 0;
+  if (norm === "semi-precious" || norm === "semiprecious" || norm === "semi precious") return 1;
+  if (norm === "organic") return 2;
+  return 3; // "Others"
+}
+
+/**
+ * Sorts gemstones by the required default order:
+ * Precious first -> Semi-precious second -> Organic third -> Others fourth.
+ * Within each category, stones are sorted alphabetically by variety (A → Z).
+ */
+export function sortGemstonesByDefault(gemstones: Gemstone[]): Gemstone[] {
+  return [...gemstones].sort((a, b) => {
+    const catA = classifyGemCategory(a);
+    const catB = classifyGemCategory(b);
+    const rankA = getCategoryRank(catA);
+    const rankB = getCategoryRank(catB);
+
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+
+    const nameA = (a.variety || (a as any).Title || "").toString();
+    const nameB = (b.variety || (b as any).Title || "").toString();
+    return nameA.localeCompare(nameB, undefined, { sensitivity: "base" });
+  });
+}
+
+/**
+ * Optimizes image URLs for fast thumbnail rendering (e.g. resizing Unsplash images, WebP format, quality tuning)
+ */
+export function getOptimizedThumbnailUrl(url?: string | null, width = 300): string | undefined {
+  if (!url || typeof url !== "string") return undefined;
+  const trimmed = url.trim();
+  if (!trimmed) return undefined;
+
+  // Unsplash image optimization
+  if (trimmed.includes("images.unsplash.com")) {
+    try {
+      // If URL already has params, adjust width and quality
+      if (trimmed.includes("?")) {
+        const base = trimmed.split("?")[0];
+        return `${base}?w=${width}&q=80&auto=format&fit=crop`;
+      }
+      return `${trimmed}?w=${width}&q=80&auto=format&fit=crop`;
+    } catch {
+      return trimmed;
+    }
+  }
+
+  return trimmed;
+}
 
 export const CRYSTAL_SYSTEMS = [
   "Cubic",

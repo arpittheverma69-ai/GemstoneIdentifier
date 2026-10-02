@@ -58,16 +58,19 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
       ) : null}
 
       <View style={styles.content}>
-        <View style={[styles.iconContainer, { backgroundColor: theme.primary }]}>
+        <View
+          style={[styles.iconContainer, { backgroundColor: theme.primary }]}
+        >
           <Feather name="alert-triangle" size={40} color="#FFFFFF" />
         </View>
-        
+
         <ThemedText type="h2" style={styles.title}>
-          GemAI Pro Needs a Restart
+          GemSpy Needs a Restart
         </ThemedText>
 
         <ThemedText type="body" style={styles.message}>
-          Something unexpected happened. Tap below to restart and continue identifying gemstones.
+          Something unexpected happened. Tap below to restart and continue
+          identifying gemstones.
         </ThemedText>
 
         <Pressable
@@ -81,12 +84,17 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             },
           ]}
         >
-          <Feather name="refresh-cw" size={20} color="#FFFFFF" style={styles.buttonIcon} />
+          <Feather
+            name="refresh-cw"
+            size={20}
+            color="#FFFFFF"
+            style={styles.buttonIcon}
+          />
           <ThemedText
             type="body"
             style={[styles.buttonText, { color: theme.buttonText }]}
           >
-            Restart GemAI Pro
+            Restart GemSpy
           </ThemedText>
         </Pressable>
       </View>

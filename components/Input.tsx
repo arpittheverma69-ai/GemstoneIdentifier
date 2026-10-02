@@ -1,7 +1,17 @@
 import React, { useState } from "react";
-import { StyleSheet, TextInput, View, TextInputProps, Pressable } from "react-native";
+import {
+  StyleSheet,
+  TextInput,
+  View,
+  TextInputProps,
+  Pressable,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -18,17 +28,17 @@ interface InputProps extends TextInputProps {
 
 const AnimatedView = Animated.createAnimatedComponent(View);
 
-export function Input({ 
-  label, 
-  error, 
+export function Input({
+  label,
+  error,
   mono = false,
-  style, 
+  style,
   leftIcon,
   rightIcon,
   onRightIconPress,
   onFocus,
   onBlur,
-  ...props 
+  ...props
 }: InputProps) {
   const themeResult = useTheme();
   const theme = themeResult?.theme || {
@@ -62,7 +72,10 @@ export function Input({
   return (
     <View style={styles.container}>
       {label ? (
-        <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>
+        <ThemedText
+          type="caption"
+          style={[styles.label, { color: theme.textSecondary }]}
+        >
           {label}
         </ThemedText>
       ) : null}
@@ -74,10 +87,10 @@ export function Input({
               backgroundColor: theme.inputBackground,
               color: theme.text,
               fontFamily: mono ? Fonts?.mono : undefined,
-              borderColor: error 
-                ? theme.danger 
-                : isFocused 
-                  ? theme.primary 
+              borderColor: error
+                ? theme.danger
+                : isFocused
+                  ? theme.primary
                   : theme.border,
               borderWidth: 2,
               paddingLeft: leftIcon ? 44 : Spacing.lg,
@@ -91,21 +104,21 @@ export function Input({
           onBlur={handleBlur}
           {...props}
         />
-        {leftIcon ? (
-          <View style={styles.leftIcon}>
-            {leftIcon}
-          </View>
-        ) : null}
+        {leftIcon ? <View style={styles.leftIcon}>{leftIcon}</View> : null}
         {rightIcon ? (
-          <Pressable 
+          <Pressable
             onPress={onRightIconPress}
             style={({ pressed }) => [
               styles.rightIcon,
-              { opacity: pressed ? 0.6 : 1 }
+              { opacity: pressed ? 0.6 : 1 },
             ]}
           >
-            {typeof rightIcon === 'string' ? (
-              <Feather name={rightIcon as keyof typeof Feather.glyphMap} size={20} color={isFocused ? theme.primary : theme.textSecondary} />
+            {typeof rightIcon === "string" ? (
+              <Feather
+                name={rightIcon as keyof typeof Feather.glyphMap}
+                size={20}
+                color={isFocused ? theme.primary : theme.textSecondary}
+              />
             ) : (
               rightIcon
             )}
@@ -113,7 +126,10 @@ export function Input({
         ) : null}
       </AnimatedView>
       {error ? (
-        <ThemedText type="caption" style={[styles.error, { color: theme.danger }]}>
+        <ThemedText
+          type="caption"
+          style={[styles.error, { color: theme.danger }]}
+        >
           {error}
         </ThemedText>
       ) : null}

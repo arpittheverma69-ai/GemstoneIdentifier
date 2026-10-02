@@ -57,3 +57,4 @@ app-example
 
 # Local/Replit files
 .local/
+.vercel

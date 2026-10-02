@@ -1,0 +1,33 @@
+// Category Badge Component
+const CategoryBadge = ({ category }: { category: string }) => {
+  const theme = getThemeSafe().theme;
+  const getCategoryColor = (cat: string) => {
+    switch (cat) {
+      case 'Precious': return theme.success;
+      case 'Semi-precious': return theme.primary;
+      case 'Organic': return theme.secondary;
+      default: return theme.textSecondary;
+    }
+  };
+
+  return (
+    <View style={[
+      styles.categoryBadge,
+      { backgroundColor: getCategoryColor(category) + '20', borderColor: getCategoryColor(category) }
+    ]}>
+      <ThemedText type="caption" style={{ color: getCategoryColor(category), fontSize: 10, fontWeight: '600' }}>
+        {category}
+      </ThemedText>
+    </View>
+  );
+};
+
+// Add these styles to the styles object:
+// categoryBadge: {
+//   paddingHorizontal: 8,
+//   paddingVertical: 4,
+//   borderRadius: 12,
+//   borderWidth: 1,
+//   alignSelf: 'flex-start',
+//   marginTop: 8,
+// }

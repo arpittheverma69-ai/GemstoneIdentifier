@@ -2,11 +2,13 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import GemDatabaseScreen from "@/screens/GemDatabaseScreen";
+import GemComparisonScreen from "@/screens/GemComparisonScreen";
 import { useTheme } from "@/hooks/useTheme";
 import { getCommonScreenOptions } from "@/navigation/screenOptions";
 
 export type DatabaseStackParamList = {
   GemDatabase: undefined;
+  GemComparison: undefined;
 };
 
 const Stack = createNativeStackNavigator<DatabaseStackParamList>();
@@ -22,7 +24,14 @@ export default function DatabaseStackNavigator() {
         name="GemDatabase"
         component={GemDatabaseScreen}
         options={{
-          headerTitle: "Gems",
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="GemComparison"
+        component={GemComparisonScreen}
+        options={{
+          headerShown: false,
         }}
       />
     </Stack.Navigator>

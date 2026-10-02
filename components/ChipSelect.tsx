@@ -13,10 +13,10 @@ interface ChipSelectProps {
   multi?: boolean;
 }
 
-export function ChipSelect({ 
-  label, 
-  options, 
-  selected, 
+export function ChipSelect({
+  label,
+  options,
+  selected,
   onSelect,
   multi = true,
 }: ChipSelectProps) {
@@ -25,7 +25,7 @@ export function ChipSelect({
   const handlePress = (option: string) => {
     if (multi) {
       if (selected.includes(option)) {
-        onSelect(selected.filter(s => s !== option));
+        onSelect(selected.filter((s) => s !== option));
       } else {
         onSelect([...selected, option]);
       }
@@ -37,12 +37,15 @@ export function ChipSelect({
   return (
     <View style={styles.container}>
       {label ? (
-        <ThemedText type="caption" style={[styles.label, { color: theme.textSecondary }]}>
+        <ThemedText
+          type="caption"
+          style={[styles.label, { color: theme.textSecondary }]}
+        >
           {label}
         </ThemedText>
       ) : null}
-      <ScrollView 
-        horizontal 
+      <ScrollView
+        horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chips}
       >
@@ -56,14 +59,14 @@ export function ChipSelect({
                 styles.chip,
                 Shadows.sm,
                 {
-                  backgroundColor: isSelected 
-                    ? theme.primary 
+                  backgroundColor: isSelected
+                    ? theme.primary
                     : theme.inputBackground,
                   opacity: pressed ? 0.8 : 1,
                 },
               ]}
             >
-              <ThemedText 
+              <ThemedText
                 type="small"
                 style={{ color: isSelected ? "#FFFFFF" : theme.text }}
               >

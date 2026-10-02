@@ -183,7 +183,7 @@ export class GeminiIdentificationService {
     `;
 
     try {
-      const parts = [prompt];
+      const parts: any[] = [prompt];
       
       if (imageData) {
         parts.push({

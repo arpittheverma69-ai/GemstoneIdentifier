@@ -19,7 +19,7 @@ import { Spacing, BorderRadius } from '@/constants/theme';
 import { bulkImportGemstones, parseCSVData, BulkGemstoneData } from '@/utils/bulkImport';
 
 export default function BulkImportScreen() {
-  const theme = useTheme();
+  const { theme } = useTheme();
   const [isLoading, setIsLoading] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [selectedFile, setSelectedFile] = useState<any>(null);

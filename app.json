@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "GemAI Pro",
+    "name": "GemSpy",
     "slug": "GemX",
     "version": "1.0.0",
-    "description": "Professional gemstone identification and business management app powered by AI. Identify gemstones, manage inventory, and generate certificates.",
+    "description": "GemSpy is your professional gemstone identification and business management app powered by AI. Identify gemstones, manage inventory, and generate certificates with ease.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gemaipro",
@@ -33,6 +33,10 @@
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
         "READ_MEDIA_IMAGES"
       ]
     },
@@ -59,12 +63,18 @@
       "reactCompiler": true
     },
     "extra": {
-      "supabaseUrl": "https://qwdshcurrksnqqrbzseu.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZHNoY3VycmtzbnFxcmJ6c2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUwMzU3MzYsImV4cCI6MjA4MDYxMTczNn0.78vnhdFLvUGBZ3uUuxseysmNvf0E_YDg4y8xLwOf74I",
+      "supabaseUrl": "https://tgwxpyfespesfnqadnpn.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnd3hweWZlc3Blc2ZucWFkbnBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3NTc2MTgsImV4cCI6MjA4NTMzMzYxOH0.N8IS0J58Vgy33GLvQTkmpLbYg9tkQF9Isqefe727ym0",
       "eas": {
         "projectId": "0475a416-d77c-4053-9616-de37b557b5ab"
       }
     },
-    "owner": "arpitwillgetit"
+    "owner": "arpitwillgetit",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0475a416-d77c-4053-9616-de37b557b5ab"
+    }
   }
 }

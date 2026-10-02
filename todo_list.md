@@ -1,0 +1,4 @@
+- [ ] Add bottom-sheet sort picker (A-Z/Z-A, RI high/low, SG high/low) with totals display
+- [ ] Remove fallback card view and old components usage
+- [ ] Fix theme color usages (danger/warning) in GemDatabaseScreen
+- [ ] Ensure update flow sends images/tag/name (gemstoneService + form)

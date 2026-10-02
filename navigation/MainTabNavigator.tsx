@@ -9,6 +9,7 @@ import IdentificationStackNavigator from "@/navigation/IdentificationStackNaviga
 import DatabaseStackNavigator from "@/navigation/DatabaseStackNavigator";
 import BusinessStackNavigator from "@/navigation/BusinessStackNavigator";
 import CertificateStackNavigator from "@/navigation/CertificateStackNavigator";
+import SettingsStackNavigator from "@/navigation/SettingsStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import { BorderRadius, Shadows } from "@/constants/theme";
 
@@ -17,6 +18,7 @@ export type MainTabParamList = {
   DatabaseTab: undefined;
   BusinessTab: undefined;
   CertificateTab: undefined;
+  SettingsTab: undefined;
 };
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -26,7 +28,7 @@ export default function MainTabNavigator() {
 
   return (
     <Tab.Navigator
-      initialRouteName="IdentificationTab"
+      initialRouteName="DatabaseTab"
       screenOptions={{
         tabBarActiveTintColor: theme.tabIconSelected,
         tabBarInactiveTintColor: theme.tabIconDefault,
@@ -37,14 +39,28 @@ export default function MainTabNavigator() {
             android: isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.95)",
           }),
           borderTopWidth: 0,
-          elevation: 0,
-          height: Platform.OS === "ios" ? 88 : 70,
-          paddingBottom: Platform.OS === "ios" ? 28 : 12,
-          paddingTop: 12,
+          height: Platform.OS === 'web' ? 50 : (Platform.OS === "ios" ? 88 : 70), // Reduced height for web
+          paddingBottom: Platform.OS === 'web' ? 8 : (Platform.OS === "ios" ? 28 : 12), // Reduced padding for web
+          paddingTop: Platform.OS === 'web' ? 8 : 12, // Reduced padding for web
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
           ...Shadows.xl,
         },
         tabBarBackground: () =>
-          Platform.OS === "ios" ? (
+          Platform.OS === 'web' ? (
+            <div style={{
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              backgroundColor: isDark ? 'rgba(15, 23, 42, 0.8)' : 'rgba(255, 255, 255, 0.8)',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+            }} />
+          ) : Platform.OS === "ios" ? (
             <BlurView
               intensity={95}
               tint={isDark ? "dark" : "light"}
@@ -52,40 +68,40 @@ export default function MainTabNavigator() {
             />
           ) : null,
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: Platform.OS === 'web' ? 10 : 12, // Smaller font for web
           fontWeight: "600",
-          marginTop: 4,
+          marginTop: Platform.OS === 'web' ? 2 : 4, // Reduced margin for web
         },
         tabBarIconStyle: {
-          marginTop: 4,
+          marginTop: Platform.OS === 'web' ? 2 : 4, // Reduced margin for web
         },
         headerShown: false,
       }}
     >
-      <Tab.Screen
-        name="IdentificationTab"
-        component={IdentificationStackNavigator}
-        options={{
-          title: "Identify",
-          tabBarIcon: ({ color, size, focused }) => (
-            <AnimatedIcon 
-              name="search" 
-              size={focused ? size + 2 : size} 
-              color={color} 
-              focused={focused}
-            />
-          ),
-        }}
-      />
       <Tab.Screen
         name="DatabaseTab"
         component={DatabaseStackNavigator}
         options={{
           title: "Gems",
           tabBarIcon: ({ color, size, focused }) => (
-            <DiamondIcon 
-              size={focused ? size + 2 : size} 
-              color={color} 
+            <DiamondIcon
+              size={focused ? size + 2 : size}
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="IdentificationTab"
+        component={IdentificationStackNavigator}
+        options={{
+          title: "Identify",
+          tabBarIcon: ({ color, size, focused }) => (
+            <AnimatedIcon
+              name="search"
+              size={focused ? size + 2 : size}
+              color={color}
               focused={focused}
             />
           ),
@@ -114,6 +130,21 @@ export default function MainTabNavigator() {
           tabBarIcon: ({ color, size, focused }) => (
             <AnimatedIcon 
               name="award" 
+              size={focused ? size + 2 : size} 
+              color={color} 
+              focused={focused}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="SettingsTab"
+        component={SettingsStackNavigator}
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, size, focused }) => (
+            <AnimatedIcon 
+              name="settings" 
               size={focused ? size + 2 : size} 
               color={color} 
               focused={focused}

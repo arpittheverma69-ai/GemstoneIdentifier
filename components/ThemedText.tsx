@@ -6,7 +6,16 @@ import { Typography, Fonts } from "@/constants/theme";
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
   darkColor?: string;
-  type?: "h1" | "h2" | "h3" | "h4" | "body" | "small" | "caption" | "link" | "mono";
+  type?:
+    | "h1"
+    | "h2"
+    | "h3"
+    | "h4"
+    | "body"
+    | "small"
+    | "caption"
+    | "link"
+    | "mono";
 };
 
 export function ThemedText({

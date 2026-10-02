@@ -92,7 +92,16 @@ export default function BusinessHubScreen() {
   const [expandedDealer, setExpandedDealer] = useState<string | null>(null);
   const [orderFilter, setOrderFilter] = useState<"all" | "pending" | "completed" | "cancelled">("all");
   const [isUploading, setIsUploading] = useState(false);
-  const [newItem, setNewItem] = useState({
+  const [newItem, setNewItem] = useState<{
+    stoneName: string;
+    weight: string;
+    grade: string;
+    costPrice: string;
+    sellingPrice: string;
+    notes: string;
+    imageUri: string | null;
+    imageUrl: string | null;
+  }>({
     stoneName: "",
     weight: "",
     grade: "",
@@ -139,6 +148,10 @@ export default function BusinessHubScreen() {
       const fileExt = uri.split('.').pop();
       const fileName = `${Date.now()}.${fileExt}`;
       
+      if (!supabase) {
+        throw new Error('Supabase client not initialized');
+      }
+
       // Convert image to blob
       const response = await fetch(uri);
       const blob = await response.blob();
@@ -707,39 +720,6 @@ export default function BusinessHubScreen() {
               </View>
             </View>
           )}
-          <View style={styles.formSpacer} />
-          <Button
-            onPress={async () => {
-              Alert.alert(
-                "Sign Out",
-                "Are you sure you want to sign out?",
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Sign Out",
-                    style: "destructive",
-                    onPress: async () => {
-                      const result = await signOut();
-                      if (result.success) {
-                        setUser(null);
-                      } else {
-                        Alert.alert("Error", result.error || "Failed to sign out");
-                      }
-                    },
-                  },
-                ]
-              );
-            }}
-            variant="outline"
-            style={[styles.signOutButton, { borderColor: theme.danger }]}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
-              <Feather name="log-out" size={18} color={theme.danger} style={{ marginRight: Spacing.sm }} />
-              <ThemedText type="body" style={{ color: theme.danger, fontWeight: "600" }}>
-                Sign Out
-              </ThemedText>
-            </View>
-          </Button>
         </Card>
 
         <View style={styles.bottomSpacer} />

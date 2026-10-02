@@ -102,7 +102,7 @@ export function Button({
       type="body"
       style={[
         styles.buttonText,
-        { 
+        {
           color: getTextColor(),
           fontWeight: variant === "primary" ? "700" : "600",
         },
@@ -114,51 +114,56 @@ export function Button({
 
   if (variant === "primary") {
     return (
-      <AnimatedPressable
+      <Pressable
+        accessibilityRole="button"
         onPress={disabled ? undefined : onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={disabled}
-        style={[
+        style={({ pressed }) => [
           styles.button,
-          { height: getHeight(), opacity: disabled ? 0.6 : 1 },
+          { height: getHeight(), opacity: disabled ? 0.6 : pressed ? 0.92 : 1 },
           getShadowStyle(),
           style,
-          animatedStyle,
         ]}
       >
         <LinearGradient
           colors={[theme.gradientStart, theme.gradientEnd]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: BorderRadius.full }]}
+          style={[StyleSheet.absoluteFill, { borderRadius: BorderRadius.full, pointerEvents: "none" }]}
         />
-        {buttonContent}
-      </AnimatedPressable>
+        <Animated.View style={[{ alignItems: "center", justifyContent: "center", width: "100%" }, animatedStyle]}>
+          {buttonContent}
+        </Animated.View>
+      </Pressable>
     );
   }
 
   return (
-    <AnimatedPressable
+    <Pressable
+      accessibilityRole="button"
       onPress={disabled ? undefined : onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled}
-      style={[
+      style={({ pressed }) => [
         styles.button,
         {
           height: getHeight(),
-          backgroundColor: variant === "secondary" ? theme.backgroundSecondary : "transparent",
-          opacity: disabled ? 0.5 : 1,
+          backgroundColor:
+            variant === "secondary" ? theme.backgroundSecondary : "transparent",
+          opacity: disabled ? 0.5 : pressed ? 0.8 : 1,
         },
         getBorderStyle(),
         variant === "secondary" ? Shadows.sm : {},
         style,
-        animatedStyle,
       ]}
     >
-      {buttonContent}
-    </AnimatedPressable>
+      <Animated.View style={[{ alignItems: "center", justifyContent: "center", width: "100%" }, animatedStyle]}>
+        {buttonContent}
+      </Animated.View>
+    </Pressable>
   );
 }
 

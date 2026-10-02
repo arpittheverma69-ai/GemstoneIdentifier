@@ -7,19 +7,22 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Image,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Input } from "@/components/Input";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import EmailConfirmationSheet from "@/components/EmailConfirmationSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, Shadows } from "@/constants/theme";
 import { signUp } from "@/services/authService";
 import { useAuth } from "@/contexts/AuthContext";
+import { submitAccessRequest } from "@/services/accessRequestService";
 
 export default function SignUpScreen({ navigation }: any) {
   const { theme } = useTheme();
@@ -28,9 +31,11 @@ export default function SignUpScreen({ navigation }: any) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [requestedRole, setRequestedRole] = useState<"Student" | "Curator">("Student");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
 
   const validateForm = () => {
     if (!fullName.trim()) {
@@ -69,27 +74,50 @@ export default function SignUpScreen({ navigation }: any) {
     try {
       const result = await signUp(email.trim(), password, fullName.trim());
       if (result.success && result.user) {
-        Alert.alert(
-          "Success",
-          "Account created successfully! Please check your email to verify your account.",
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                setUser(result.user!);
-                // Navigation will be handled by App.tsx
-              },
-            },
-          ]
-        );
+        // Automatically register initial pending request with selected role
+        try {
+          await submitAccessRequest(
+            result.user.id,
+            result.user.email || email.trim(),
+            requestedRole,
+            "Signed up requesting " + requestedRole + " role",
+            fullName.trim()
+          );
+        } catch (err) {
+          console.warn("Error auto-submitting access request during sign up:", err);
+        }
+
+        // Set user immediately - App.tsx automatically switches to MainTabNavigator
+        setUser(result.user);
       } else {
-        Alert.alert("Sign Up Failed", result.error || "Failed to create account");
+        const message = result.error || "Failed to create account";
+        switch (result.errorCode) {
+          case "email_taken":
+            Alert.alert("Email Already Registered", "That email is already in use. Try signing in or use a different email.");
+            break;
+          case "network_error":
+            Alert.alert("Network Error", "We couldn't reach the server. Please check your internet connection and try again.");
+            break;
+          default:
+            Alert.alert("Sign Up Failed", message);
+            break;
+        }
       }
     } catch (error: any) {
       Alert.alert("Error", error.message || "An error occurred during sign up");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleEmailConfirmation = () => {
+    setShowEmailConfirmation(false);
+    // Set user to go to main app
+    setUser({
+      id: "temp", // Will be updated by auth context
+      email: email,
+      full_name: fullName,
+    });
   };
 
   return (
@@ -105,14 +133,29 @@ export default function SignUpScreen({ navigation }: any) {
         >
           {/* Header */}
           <View style={styles.header}>
-            <View style={[styles.logoContainer, { backgroundColor: theme.primary + "20" }]}>
-              <Feather name="hexagon" size={48} color={theme.primary} />
-            </View>
+            <Card
+              style={[
+                styles.logoCard,
+                Shadows.lg,
+                {
+                  backgroundColor: theme.backgroundDefault,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
+              <View style={styles.logoInnerWrapper}>
+                <Image
+                  source={require("../assets/images/gemspyLogo.png")}
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </Card>
             <ThemedText type="h1" style={styles.title}>
               Create Account
             </ThemedText>
             <ThemedText type="body" style={[styles.subtitle, { color: theme.textSecondary }]}>
-              Join GemAI Pro to unlock all features
+              Join GemSpy to unlock all features
             </ThemedText>
           </View>
 
@@ -176,6 +219,51 @@ export default function SignUpScreen({ navigation }: any) {
               }
             />
             <View style={styles.formSpacer} />
+            
+            {/* Role Preference */}
+            <View style={{ marginBottom: Spacing.md }}>
+              <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.xs, fontWeight: "600" }}>
+                Request Initial Access Role:
+              </ThemedText>
+              <View style={{ flexDirection: "row", gap: Spacing.sm }}>
+                <Pressable
+                  onPress={() => setRequestedRole("Student")}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    paddingHorizontal: Spacing.md,
+                    borderRadius: BorderRadius.md,
+                    borderWidth: 1.5,
+                    borderColor: requestedRole === "Student" ? theme.primary : theme.border,
+                    backgroundColor: requestedRole === "Student" ? theme.primary + "15" : theme.backgroundSecondary,
+                    alignItems: "center",
+                  }}
+                >
+                  <ThemedText type="small" style={{ fontWeight: "700", color: requestedRole === "Student" ? theme.primary : theme.text }}>
+                    🎓 Student
+                  </ThemedText>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => setRequestedRole("Curator")}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    paddingHorizontal: Spacing.md,
+                    borderRadius: BorderRadius.md,
+                    borderWidth: 1.5,
+                    borderColor: requestedRole === "Curator" ? theme.primary : theme.border,
+                    backgroundColor: requestedRole === "Curator" ? theme.primary + "15" : theme.backgroundSecondary,
+                    alignItems: "center",
+                  }}
+                >
+                  <ThemedText type="small" style={{ fontWeight: "700", color: requestedRole === "Curator" ? theme.primary : theme.text }}>
+                    🔬 Curator
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+
             <Button
               onPress={handleSignUp}
               variant="primary"
@@ -185,7 +273,7 @@ export default function SignUpScreen({ navigation }: any) {
               {isLoading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                "Create Account"
+                "Create Account & Request Role"
               )}
             </Button>
             <View style={styles.formSpacer} />
@@ -205,6 +293,12 @@ export default function SignUpScreen({ navigation }: any) {
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      <EmailConfirmationSheet
+        visible={showEmailConfirmation}
+        email={email}
+        onConfirm={handleEmailConfirmation}
+      />
     </SafeAreaView>
   );
 }
@@ -225,13 +319,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: Spacing.xl * 2,
   },
-  logoContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  logoCard: {
+    width: 148,
+    height: 148,
+    borderRadius: BorderRadius.full,
+    padding: Spacing.md,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: Spacing.lg,
+  },
+  logoInnerWrapper: {
+    width: "100%",
+    height: "100%",
+    borderRadius: BorderRadius.full,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
   },
   title: {
     fontWeight: "700",
@@ -259,6 +367,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
 });
+
 
 
 

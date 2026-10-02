@@ -7,6 +7,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -44,10 +45,30 @@ export default function LoginScreen({ navigation }: any) {
         setUser(result.user);
         // Navigation will be handled by App.tsx based on auth state
       } else {
-        Alert.alert("Login Failed", result.error || "Invalid email or password");
+        const message = result.error || "Invalid email or password";
+        switch (result.errorCode) {
+          case "invalid_credentials":
+            Alert.alert("Login Failed", "Incorrect email or password. Please try again.");
+            break;
+          case "email_not_confirmed":
+            Alert.alert(
+              "Email Not Verified",
+              "Please verify your email address before signing in. Check your inbox for the confirmation link."
+            );
+            break;
+          case "user_not_found":
+            Alert.alert("Account Not Found", "We couldn't find an account with that email. Please check for typos or sign up.");
+            break;
+          case "network_error":
+            Alert.alert("Network Error", "We couldn't reach the server. Please check your internet connection and try again.");
+            break;
+          default:
+            Alert.alert("Login Failed", message);
+            break;
+        }
       }
     } catch (error: any) {
-      Alert.alert("Error", error.message || "An error occurred during login");
+      Alert.alert("Error", error.message || "An unexpected error occurred during login");
     } finally {
       setIsLoading(false);
     }
@@ -96,16 +117,31 @@ export default function LoginScreen({ navigation }: any) {
         >
           {/* Header */}
           <View style={styles.header}>
-            <View style={[styles.logoContainer, { backgroundColor: theme.primary + "20" }]}>
-              <Feather name="hexagon" size={48} color={theme.primary} />
-            </View>
+            <Card
+              style={[
+                styles.logoCard,
+                Shadows.lg,
+                {
+                  backgroundColor: theme.backgroundDefault,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
+              <View style={styles.logoInnerWrapper}>
+                <Image
+                  source={require("../assets/images/gemspyLogo.png")}
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
+              </View>
+            </Card>
             <ThemedText type="h1" style={styles.title}>
               Welcome Back
             </ThemedText>
             <ThemedText type="body" style={[styles.subtitle, { color: theme.textSecondary }]}>
               {forgotPasswordMode
                 ? "Enter your email to reset your password"
-                : "Sign in to continue to GemAI Pro"}
+                : "Sign in to continue to GemSpy"}
             </ThemedText>
           </View>
 
@@ -236,13 +272,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: Spacing.xl * 2,
   },
-  logoContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+  logoCard: {
+    width: 148,
+    height: 148,
+    borderRadius: BorderRadius.full,
+    padding: Spacing.md,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: Spacing.lg,
+  },
+  logoInnerWrapper: {
+    width: "100%",
+    height: "100%",
+    borderRadius: BorderRadius.full,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111827",
+  },
+  logoImage: {
+    width: "100%",
+    height: "100%",
   },
   title: {
     fontWeight: "700",
@@ -274,6 +324,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
 });
+
 
 
 

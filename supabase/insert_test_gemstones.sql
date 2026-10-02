@@ -203,3 +203,4 @@ INSERT INTO public.gemstones (
 ) ON CONFLICT DO NOTHING;
 
 
+

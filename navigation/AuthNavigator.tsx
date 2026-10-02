@@ -2,12 +2,14 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import LoginScreen from "@/screens/LoginScreen";
 import SignUpScreen from "@/screens/SignUpScreen";
+import EmailVerificationScreen from "@/screens/EmailVerificationScreen";
 import { useTheme } from "@/hooks/useTheme";
 import { getCommonScreenOptions } from "./screenOptions";
 
 export type AuthStackParamList = {
   Login: undefined;
   SignUp: undefined;
+  EmailVerification: undefined;
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -34,9 +36,17 @@ export default function AuthNavigator() {
           headerShown: false,
         }}
       />
+      <Stack.Screen
+        name="EmailVerification"
+        component={EmailVerificationScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
     </Stack.Navigator>
   );
 }
+
 
 
 

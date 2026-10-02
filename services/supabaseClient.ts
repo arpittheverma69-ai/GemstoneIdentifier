@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import Constants from "expo-constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Get configuration from environment variables or app.json
 const extra = (Constants?.expoConfig as any)?.extra || {};
@@ -19,11 +20,19 @@ export const supabase: SupabaseClient | null =
   SUPABASE_URL && SUPABASE_ANON_KEY 
     ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
-          storage: require("@react-native-async-storage/async-storage").default,
+          storage: AsyncStorage,
           autoRefreshToken: true,
           persistSession: true,
           detectSessionInUrl: false,
         },
+        global: {
+          headers: {
+            'X-Client-Info': 'gemspy-app'
+          }
+        },
+        db: {
+          schema: 'public'
+        }
       })
     : null;
 
@@ -32,6 +41,16 @@ if (!supabase) {
   console.warn(
     "⚠️ Supabase is not configured. Please set SUPABASE_URL and SUPABASE_ANON_KEY in your environment variables or app.json"
   );
+}
+
+// Handle auth errors globally
+if (supabase) {
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT") {
+      // Clear any stale tokens
+      AsyncStorage.removeItem("sb-auth-token");
+    }
+  });
 }
 
 export interface GemMeasurement {
