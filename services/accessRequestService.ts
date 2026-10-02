@@ -111,7 +111,7 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
           id: data.id,
           user_id: data.user_id,
           email: data.email,
-          requested_role: data.requested_role || "Student",
+          requested_role: (data.requested_role as any) || "Student",
           reason: data.reason || data.rejection_reason || "",
           status: data.status || "Pending",
           rejection_reason: data.rejection_reason,
@@ -128,7 +128,7 @@ export async function getUserRoleAndAccessInfo(userId: string, email?: string): 
     }
   }
 
-  // If approved role is Student, Curator, or Admin, they are NOT restricted
+  // If role in user_roles is already Approved (Student, Curator, Admin), clear restriction
   const isApprovedRole = role === "Admin" || role === "Curator" || role === "Student";
   const isRestricted = !isApprovedRole;
 
@@ -172,7 +172,6 @@ export async function submitAccessRequest(
   try {
     const existingRaw = await AsyncStorage.getItem(STORAGE_PENDING_REQUESTS);
     let allRequests: PendingUserRequest[] = existingRaw ? JSON.parse(existingRaw) : [];
-    // Remove any previous request from same user
     allRequests = allRequests.filter((r) => r.user_id !== userId);
     allRequests.unshift(newRequest);
     await AsyncStorage.setItem(STORAGE_PENDING_REQUESTS, JSON.stringify(allRequests));
@@ -184,29 +183,43 @@ export async function submitAccessRequest(
     console.warn("Error saving pending request locally:", e);
   }
 
-  // 2. Insert into Supabase pending_users table
+  // 2. Update Supabase
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      // First update user_roles so user is registered in database as Pending
+      await supabase.from("user_roles").upsert(
+        {
+          id: userId,
+          email: email.trim().toLowerCase(),
+          role: "Pending",
+          can_edit: false,
+          can_add: false,
+          can_approve: false,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+      // Clean old pending_users rows for this user then insert new one
+      try {
+        await supabase.from("pending_users").delete().eq("user_id", userId);
+      } catch (_) {}
+
+      const { data: insertedData, error: insertErr } = await supabase
         .from("pending_users")
-        .upsert(
-          {
-            user_id: userId,
-            email: email.trim().toLowerCase(),
-            requested_role: requestedRole,
-            status: "Pending",
-            created_at: newRequest.created_at,
-            updated_at: newRequest.updated_at,
-          },
-          { onConflict: "user_id" }
-        )
+        .insert({
+          user_id: userId,
+          email: email.trim().toLowerCase(),
+          requested_role: requestedRole,
+          status: "Pending",
+          created_at: newRequest.created_at,
+          updated_at: newRequest.updated_at,
+        })
         .select()
         .maybeSingle();
 
-      if (error) {
-        console.warn("Supabase pending_users insert warning:", error.message);
-      } else if (data) {
-        newRequest.id = data.id || newRequest.id;
+      if (insertedData?.id) {
+        newRequest.id = insertedData.id;
         await AsyncStorage.setItem(
           `${STORAGE_USER_REQUEST_PREFIX}${userId}`,
           JSON.stringify(newRequest)
@@ -224,20 +237,9 @@ export async function submitAccessRequest(
  * Get all pending user requests for Admin view
  */
 export async function getAllPendingRequests(): Promise<PendingUserRequest[]> {
-  let list: PendingUserRequest[] = [];
+  const userMap = new Map<string, PendingUserRequest>();
 
-  // 1. Fetch from local AsyncStorage
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_PENDING_REQUESTS);
-    if (raw) {
-      const parsed: PendingUserRequest[] = JSON.parse(raw);
-      list = parsed.filter((r) => r.status === "Pending");
-    }
-  } catch (e) {
-    console.warn("Error reading local pending requests:", e);
-  }
-
-  // 2. Fetch from Supabase
+  // 1. Fetch from Supabase pending_users table
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -247,29 +249,74 @@ export async function getAllPendingRequests(): Promise<PendingUserRequest[]> {
         .order("created_at", { ascending: false });
 
       if (data && data.length > 0) {
-        const supabaseList: PendingUserRequest[] = data.map((d: any) => ({
-          id: d.id,
-          user_id: d.user_id,
-          email: d.email,
-          requested_role: d.requested_role || "Student",
-          reason: d.reason || d.rejection_reason || "",
-          status: d.status || "Pending",
-          created_at: d.created_at,
-          updated_at: d.updated_at || d.created_at,
-        }));
-
-        // Merge, prioritizing supabase entries by user_id
-        const userMap = new Map<string, PendingUserRequest>();
-        list.forEach((r) => userMap.set(r.user_id, r));
-        supabaseList.forEach((r) => userMap.set(r.user_id, r));
-        list = Array.from(userMap.values()).filter((r) => r.status === "Pending");
+        data.forEach((d: any) => {
+          userMap.set(d.user_id, {
+            id: d.id,
+            user_id: d.user_id,
+            email: d.email,
+            requested_role: (d.requested_role as any) || "Student",
+            reason: d.reason || d.rejection_reason || "",
+            status: "Pending",
+            created_at: d.created_at,
+            updated_at: d.updated_at || d.created_at,
+          });
+        });
       }
     } catch (e) {
-      console.warn("Error fetching pending requests from supabase:", e);
+      console.warn("Error fetching pending requests from supabase pending_users:", e);
     }
   }
 
-  return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  // 2. Fetch from Supabase user_roles (find any Looker or Pending users awaiting approval)
+  if (supabase) {
+    try {
+      const { data: roleUsers, error: roleError } = await supabase
+        .from("user_roles")
+        .select("*")
+        .or("role.eq.Pending,role.eq.Looker")
+        .order("created_at", { ascending: false });
+
+      if (roleUsers && roleUsers.length > 0) {
+        roleUsers.forEach((u: any) => {
+          // If not already in map from pending_users table
+          if (!userMap.has(u.id)) {
+            userMap.set(u.id, {
+              id: `role_${u.id}`,
+              user_id: u.id,
+              email: u.email || "No email",
+              requested_role: u.role === "Curator" ? "Curator" : "Student",
+              reason: "Awaiting role assignment",
+              status: "Pending",
+              created_at: u.created_at || new Date().toISOString(),
+              updated_at: u.updated_at || new Date().toISOString(),
+            });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Error fetching unassigned users from user_roles:", e);
+    }
+  }
+
+  // 3. Merge local storage pending requests
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_PENDING_REQUESTS);
+    if (raw) {
+      const parsed: PendingUserRequest[] = JSON.parse(raw);
+      parsed
+        .filter((r) => r.status === "Pending")
+        .forEach((r) => {
+          if (!userMap.has(r.user_id)) {
+            userMap.set(r.user_id, r);
+          }
+        });
+    }
+  } catch (e) {
+    console.warn("Error reading local pending requests:", e);
+  }
+
+  const result = Array.from(userMap.values());
+  return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
 /**
@@ -328,10 +375,12 @@ export async function approveAccessRequest(
       }
 
       // Update pending_users status to Approved
-      await supabase
-        .from("pending_users")
-        .update({ status: "Approved", updated_at: new Date().toISOString() })
-        .eq("user_id", userId);
+      try {
+        await supabase
+          .from("pending_users")
+          .update({ status: "Approved", updated_at: new Date().toISOString() })
+          .eq("user_id", userId);
+      } catch (_) {}
     }
 
     return { success: true };
@@ -377,14 +426,16 @@ export async function rejectAccessRequest(
 
     // 2. Update Supabase
     if (supabase) {
-      await supabase
-        .from("pending_users")
-        .update({
-          status: "Rejected",
-          rejection_reason: reason || "Request denied by administrator",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
+      try {
+        await supabase
+          .from("pending_users")
+          .update({
+            status: "Rejected",
+            rejection_reason: reason || "Request denied by administrator",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", userId);
+      } catch (_) {}
     }
 
     return { success: true };
