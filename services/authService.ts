@@ -411,7 +411,7 @@ export async function resetPassword(
         ? `${window.location.origin}`
         : "https://www.gemspy.in";
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: `${redirectUrl}/`,
     });
 
@@ -422,6 +422,160 @@ export async function resetPassword(
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || "Unknown error" };
+  }
+}
+
+// Update password for currently authenticated user
+export async function updatePassword(
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: "Database client not initialized" };
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "Password must be at least 6 characters long" };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to update password" };
+  }
+}
+
+// Change password with optional current password verification
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: "Database client not initialized" };
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "New password must be at least 6 characters long" };
+  }
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !user.email) {
+      return { success: false, error: "You must be logged in to change your password" };
+    }
+
+    // If current password provided, verify it first
+    if (currentPassword && currentPassword.trim()) {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        return { success: false, error: "Current password is incorrect. Please check and try again." };
+      }
+    }
+
+    // Update to new password
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to change password" };
+  }
+}
+
+// Delete user as Admin (calls RPC delete_user with resilient fallbacks)
+export async function deleteUserAsAdmin(
+  targetUserId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: "Database client not initialized" };
+  }
+
+  try {
+    // 1. Try RPC delete_user function
+    const { data, error } = await supabase.rpc("delete_user", {
+      target_user_id: targetUserId,
+    });
+
+    if (!error) {
+      if (typeof data === "object" && data !== null && "success" in data && !data.success) {
+        return { success: false, error: data.error || "Failed to delete user" };
+      }
+      return { success: true };
+    }
+
+    console.warn("RPC delete_user failed, attempting fallback table cleanup:", error);
+
+    // 2. Resilient Fallback: Clean up application tables
+    await supabase.from("pending_users").delete().eq("user_id", targetUserId);
+    await supabase.from("pending_gemstones").delete().eq("user_id", targetUserId);
+    await supabase.from("identification_history").delete().eq("user_id", targetUserId);
+    await supabase.from("inventory").delete().eq("user_id", targetUserId);
+    await supabase.from("user_roles").delete().eq("id", targetUserId);
+    await supabase.from("profiles").delete().eq("id", targetUserId);
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in deleteUserAsAdmin:", error);
+    return { success: false, error: error.message || "An unexpected error occurred deleting user" };
+  }
+}
+
+// Batch delete users as Admin
+export async function deleteUsersBatchAsAdmin(
+  targetUserIds: string[]
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: "Database client not initialized" };
+  }
+
+  if (!targetUserIds || targetUserIds.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  try {
+    // 1. Try RPC delete_users_batch function
+    const { data, error } = await supabase.rpc("delete_users_batch", {
+      target_user_ids: targetUserIds,
+    });
+
+    if (!error) {
+      if (typeof data === "object" && data !== null && "success" in data && !data.success) {
+        return { success: false, error: data.error || "Failed to delete users" };
+      }
+      return { success: true, count: targetUserIds.length };
+    }
+
+    console.warn("RPC delete_users_batch failed, falling back to sequential delete:", error);
+
+    // 2. Sequential deletion fallback
+    let deletedCount = 0;
+    for (const id of targetUserIds) {
+      const res = await deleteUserAsAdmin(id);
+      if (res.success) {
+        deletedCount++;
+      }
+    }
+
+    return { success: true, count: deletedCount };
+  } catch (error: any) {
+    console.error("Error in deleteUsersBatchAsAdmin:", error);
+    return { success: false, error: error.message || "Failed to batch delete users" };
   }
 }
 
@@ -459,7 +613,7 @@ export async function updateProfile(
 
 // Listen to auth state changes
 export function onAuthStateChange(
-  callback: (user: AuthUser | null) => void
+  callback: (user: AuthUser | null, event?: string) => void
 ) {
   if (!supabase) {
     return { data: { subscription: null }, error: null };
@@ -467,22 +621,23 @@ export function onAuthStateChange(
 
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange(async (_event, session) => {
+  } = supabase.auth.onAuthStateChange(async (event, session) => {
     if (session?.user) {
       ensureUserRole(session.user.id, session.user.email).catch(console.warn);
 
       if (isWebPlatform) {
-        callback(mapSupabaseUserToAuthUser(session.user));
+        callback(mapSupabaseUserToAuthUser(session.user), event);
         return;
       }
 
       const user = await getCurrentUser();
-      callback(user ?? mapSupabaseUserToAuthUser(session.user));
+      callback(user ?? mapSupabaseUserToAuthUser(session.user), event);
     } else {
-      callback(null);
+      callback(null, event);
     }
   });
 
   return { data: { subscription }, error: null };
 }
+
 

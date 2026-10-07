@@ -7,6 +7,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  TextInput,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { ThemedText } from "@/components/ThemedText";
@@ -22,6 +23,7 @@ import {
   getAllPendingRequests,
   PendingUserRequest,
 } from "@/services/accessRequestService";
+import { updatePassword } from "@/services/authService";
 
 interface UserProfile {
   id: string;
@@ -41,6 +43,59 @@ export default function SettingsScreen() {
   const [pendingRequest, setPendingRequest] = useState<PendingUserRequest | null>(null);
   const [pendingUsersCount, setPendingUsersCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Password change state
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordSuccessMessage, setPasswordSuccessMessage] = useState<string | null>(null);
+  const [passwordErrorMessage, setPasswordErrorMessage] = useState<string | null>(null);
+
+  const handlePasswordUpdate = async () => {
+    setPasswordErrorMessage(null);
+    setPasswordSuccessMessage(null);
+
+    if (!newPassword.trim()) {
+      setPasswordErrorMessage("Please enter a new password.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordErrorMessage("Password must be at least 6 characters long.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordErrorMessage("Passwords do not match. Please re-enter.");
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+      const res = await updatePassword(newPassword.trim());
+      if (res.success) {
+        setPasswordSuccessMessage("Your password has been changed successfully!");
+        setNewPassword("");
+        setConfirmPassword("");
+        if (Platform.OS === "web") {
+          window.alert("✅ Password changed successfully!");
+        } else {
+          Alert.alert("Success", "Your password has been updated successfully.");
+        }
+        setTimeout(() => {
+          setShowChangePassword(false);
+          setPasswordSuccessMessage(null);
+        }, 2500);
+      } else {
+        setPasswordErrorMessage(res.error || "Failed to update password.");
+      }
+    } catch (err: any) {
+      setPasswordErrorMessage(err.message || "An unexpected error occurred.");
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   useEffect(() => {
     loadProfileAndAccess();
@@ -406,6 +461,182 @@ export default function SettingsScreen() {
             </View>
           </View>
         )}
+
+        {/* Security & Password Section */}
+        <View
+          style={[
+            styles.section,
+            { backgroundColor: theme.backgroundDefault, borderColor: theme.border },
+          ]}
+        >
+          <Pressable
+            onPress={() => {
+              setShowChangePassword(!showChangePassword);
+              setPasswordErrorMessage(null);
+              setPasswordSuccessMessage(null);
+            }}
+            style={[
+              styles.sectionHeader,
+              { backgroundColor: theme.backgroundSecondary },
+            ]}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <ThemedText type="h4" style={{ color: theme.text }}>
+                Account Security & Password
+              </ThemedText>
+            </View>
+            <Feather
+              name={showChangePassword ? "chevron-up" : "lock"}
+              size={20}
+              color={theme.primary}
+            />
+          </Pressable>
+
+          {!showChangePassword ? (
+            <View style={{ marginTop: Spacing.xs }}>
+              <ThemedText type="small" style={{ color: theme.textSecondary }}>
+                Update your login password securely anytime.
+              </ThemedText>
+              <Pressable
+                onPress={() => setShowChangePassword(true)}
+                style={[
+                  styles.openPasswordBtn,
+                  { backgroundColor: theme.primary + "15", borderColor: theme.primary },
+                ]}
+              >
+                <Feather name="key" size={14} color={theme.primary} style={{ marginRight: 6 }} />
+                <ThemedText type="caption" style={{ color: theme.primary, fontWeight: "700" }}>
+                  Change Password
+                </ThemedText>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.passwordFormContainer}>
+              <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.sm }}>
+                Enter your new password below (minimum 6 characters).
+              </ThemedText>
+
+              {/* New Password Input */}
+              <View style={styles.passwordField}>
+                <ThemedText type="caption" style={{ color: theme.text, fontWeight: "600", marginBottom: 4 }}>
+                  New Password
+                </ThemedText>
+                <View
+                  style={[
+                    styles.passwordInputWrapper,
+                    { backgroundColor: theme.backgroundSecondary, borderColor: theme.border },
+                  ]}
+                >
+                  <Feather name="lock" size={16} color={theme.textSecondary} style={{ marginRight: Spacing.sm }} />
+                  <TextInput
+                    placeholder="Enter new password (min 6 chars)"
+                    placeholderTextColor={theme.textSecondary}
+                    secureTextEntry={!showNewPassword}
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    style={[styles.passwordTextInput, { color: theme.text }]}
+                  />
+                  <Pressable onPress={() => setShowNewPassword(!showNewPassword)}>
+                    <Feather
+                      name={showNewPassword ? "eye-off" : "eye"}
+                      size={18}
+                      color={theme.textSecondary}
+                    />
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Confirm Password Input */}
+              <View style={styles.passwordField}>
+                <ThemedText type="caption" style={{ color: theme.text, fontWeight: "600", marginBottom: 4 }}>
+                  Confirm New Password
+                </ThemedText>
+                <View
+                  style={[
+                    styles.passwordInputWrapper,
+                    { backgroundColor: theme.backgroundSecondary, borderColor: theme.border },
+                  ]}
+                >
+                  <Feather name="shield" size={16} color={theme.textSecondary} style={{ marginRight: Spacing.sm }} />
+                  <TextInput
+                    placeholder="Re-enter new password"
+                    placeholderTextColor={theme.textSecondary}
+                    secureTextEntry={!showConfirmPassword}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    style={[styles.passwordTextInput, { color: theme.text }]}
+                  />
+                  <Pressable onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+                    <Feather
+                      name={showConfirmPassword ? "eye-off" : "eye"}
+                      size={18}
+                      color={theme.textSecondary}
+                    />
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Feedback messages */}
+              {passwordErrorMessage && (
+                <View style={styles.errorBanner}>
+                  <Feather name="alert-circle" size={14} color="#EF4444" style={{ marginRight: 6 }} />
+                  <ThemedText type="caption" style={{ color: "#EF4444", fontWeight: "600", flex: 1 }}>
+                    {passwordErrorMessage}
+                  </ThemedText>
+                </View>
+              )}
+
+              {passwordSuccessMessage && (
+                <View style={styles.successBanner}>
+                  <Feather name="check-circle" size={14} color="#10B981" style={{ marginRight: 6 }} />
+                  <ThemedText type="caption" style={{ color: "#10B981", fontWeight: "600", flex: 1 }}>
+                    {passwordSuccessMessage}
+                  </ThemedText>
+                </View>
+              )}
+
+              {/* Action Buttons */}
+              <View style={styles.passwordBtnRow}>
+                <Pressable
+                  onPress={handlePasswordUpdate}
+                  disabled={isChangingPassword}
+                  style={[
+                    styles.updatePasswordBtn,
+                    { backgroundColor: theme.primary, opacity: isChangingPassword ? 0.7 : 1 },
+                  ]}
+                >
+                  {isChangingPassword ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Feather name="check" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <ThemedText type="caption" style={{ color: "#FFFFFF", fontWeight: "700" }}>
+                        Update Password
+                      </ThemedText>
+                    </>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  onPress={() => {
+                    setShowChangePassword(false);
+                    setNewPassword("");
+                    setConfirmPassword("");
+                    setPasswordErrorMessage(null);
+                  }}
+                  style={[
+                    styles.cancelPasswordBtn,
+                    { backgroundColor: theme.backgroundSecondary, borderColor: theme.border },
+                  ]}
+                >
+                  <ThemedText type="caption" style={{ color: theme.text, fontWeight: "600" }}>
+                    Cancel
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
 
         {/* Appearance & Theme Section */}
         <View
@@ -774,5 +1005,71 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     marginBottom: Spacing.xl,
+  },
+  openPasswordBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginTop: Spacing.sm,
+  },
+  passwordFormContainer: {
+    marginTop: Spacing.xs,
+  },
+  passwordField: {
+    marginBottom: Spacing.sm,
+  },
+  passwordInputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+  },
+  passwordTextInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EF444415",
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.sm,
+  },
+  successBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#10B98115",
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.sm,
+  },
+  passwordBtnRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  updatePasswordBtn: {
+    flex: 1.5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+  },
+  cancelPasswordBtn: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
   },
 });
