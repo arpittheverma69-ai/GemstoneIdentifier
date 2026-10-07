@@ -1,8 +1,8 @@
 import { useTheme } from "./useTheme";
 import { Colors } from "@/constants/theme";
 
-// Safe fallback theme
-const FALLBACK = {
+// Safe fallback themes
+const FALLBACK_LIGHT = {
   text: "#0F172A",
   textSecondary: "#64748B",
   buttonText: "#FFFFFF",
@@ -30,24 +30,53 @@ const FALLBACK = {
   gradientEnd: "#EC4899",
 };
 
+const FALLBACK_DARK = {
+  text: "#FFFFFF",
+  textSecondary: "#94A3B8",
+  buttonText: "#FFFFFF",
+  tabIconDefault: "#64748B",
+  tabIconSelected: "#A78BFA",
+  link: "#A78BFA",
+  backgroundRoot: "#0F172A",
+  backgroundDefault: "#1E293B",
+  backgroundSecondary: "#334155",
+  backgroundTertiary: "#475569",
+  primary: "#A78BFA",
+  primaryLight: "#C4B5FD",
+  primaryDark: "#8B5CF6",
+  secondary: "#FBBF24",
+  secondaryLight: "#FCD34D",
+  success: "#34D399",
+  successLight: "#6EE7B7",
+  warning: "#FBBF24",
+  warningLight: "#FCD34D",
+  danger: "#F87171",
+  dangerLight: "#FCA5A5",
+  border: "#334155",
+  inputBackground: "#1E293B",
+  gradientStart: "#A78BFA",
+  gradientEnd: "#F472B6",
+};
+
 // Safe wrapper that ALWAYS returns valid theme
 export function useThemeSafe() {
   try {
     const result = useTheme();
     if (result && result.theme && typeof result.theme === "object") {
+      const isDark = result.isDark || false;
+      const fallback = isDark ? FALLBACK_DARK : FALLBACK_LIGHT;
       return {
-        theme: { ...FALLBACK, ...result.theme },
-        isDark: result.isDark || false,
+        theme: { ...fallback, ...result.theme },
+        isDark,
       };
     }
   } catch (e) {
     // If anything fails, return fallback
   }
   
-  // Ultimate fallback
   return {
-    theme: Colors?.light || FALLBACK,
-    isDark: false,
+    theme: Colors?.dark || FALLBACK_DARK,
+    isDark: true,
   };
 }
 

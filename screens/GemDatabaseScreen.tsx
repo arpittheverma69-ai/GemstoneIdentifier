@@ -254,31 +254,8 @@ const normalizeSearchText = (value?: string): string => {
 
 type FilterChip = { key: string; label: string; onRemove: () => void };
 
-// Safety wrapper to ensure theme is always available
 function getThemeSafe() {
-  try {
-    const result = useTheme();
-    if (result && result.theme) {
-      return result;
-    }
-  } catch (e) {
-    // Fall through to default
-  }
-  return {
-    theme: {
-      text: "#0F172A",
-      textSecondary: "#64748B",
-      primary: "#8B5CF6",
-      secondary: "#F59E0B",
-      success: "#10B981",
-      backgroundRoot: "#F8FAFC",
-      backgroundDefault: "#FFFFFF",
-      backgroundSecondary: "#F1F5F9",
-      border: "#E2E8F0",
-      inputBackground: "#FFFFFF",
-    },
-    isDark: false,
-  };
+  return useTheme();
 }
 import { useScreenInsets } from "@/hooks/useScreenInsets";
 import { Spacing, BorderRadius } from "@/constants/theme";
@@ -4885,7 +4862,7 @@ function DataRow({
   mono?: boolean;
   valueColor?: string;
 }) {
-  const { theme, isDark } = getThemeSafe();
+  const { theme, isDark } = useTheme();
 
   if (!value || value === "undefined" || value === "null" || (value === "NA" && label === "Title")) return null;
 
@@ -4897,12 +4874,15 @@ function DataRow({
     stringVal = stringVal.replace(/\s*(LWUV:)/i, "\n$1");
   }
 
-  const textColor = valueColor || (isDark ? "#FFFFFF" : theme.text);
-  const labelColor = isDark ? "#94A3B8" : theme.textSecondary;
+  const textColor = valueColor ? valueColor : (isDark ? "#FFFFFF" : "#0F172A");
+  const labelColor = isDark ? "#94A3B8" : "#64748B";
 
   return (
     <View style={[styles.dataRow, { borderBottomColor: isDark ? "rgba(148, 163, 184, 0.1)" : theme.border }]}>
-      <Text
+      <ThemedText
+        type="small"
+        lightColor="#64748B"
+        darkColor="#94A3B8"
         style={{
           flex: 1,
           color: labelColor,
@@ -4912,8 +4892,11 @@ function DataRow({
         }}
       >
         {label}
-      </Text>
-      <Text
+      </ThemedText>
+      <ThemedText
+        type="body"
+        lightColor={valueColor || "#0F172A"}
+        darkColor={valueColor || "#FFFFFF"}
         style={{
           flex: 1.6,
           textAlign: 'right',
@@ -4924,7 +4907,7 @@ function DataRow({
         }}
       >
         {stringVal}
-      </Text>
+      </ThemedText>
     </View>
   );
 }

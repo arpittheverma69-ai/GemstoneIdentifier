@@ -32,7 +32,7 @@ export const Colors = {
     gradientEnd: "#EC4899",
   },
   dark: {
-    text: "#F1F5F9",
+    text: "#FFFFFF",
     textSecondary: "#94A3B8",
     buttonText: "#FFFFFF",
     tabIconDefault: "#64748B",

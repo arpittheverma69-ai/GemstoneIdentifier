@@ -35,19 +35,7 @@ interface UserProfile {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<SettingsStackParamList>>();
-  const themeContext = useTheme();
-  const theme = themeContext?.theme || {
-    text: "#0F172A",
-    textSecondary: "#64748B",
-    primary: "#8B5CF6",
-    secondary: "#F59E0B",
-    success: "#10B981",
-    backgroundRoot: "#F8FAFC",
-    backgroundDefault: "#FFFFFF",
-    backgroundSecondary: "#F1F5F9",
-    border: "#E2E8F0",
-    inputBackground: "#FFFFFF",
-  };
+  const { theme, isDark, themeMode, setThemeMode } = useTheme();
   const { user, signOut } = useAuth();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [pendingRequest, setPendingRequest] = useState<PendingUserRequest | null>(null);
@@ -419,6 +407,60 @@ export default function SettingsScreen() {
           </View>
         )}
 
+        {/* Appearance & Theme Section */}
+        <View
+          style={[
+            styles.section,
+            { backgroundColor: theme.backgroundDefault, borderColor: theme.border },
+          ]}
+        >
+          <ThemedText type="h4" style={{ color: theme.text, marginBottom: Spacing.xs }}>
+            Appearance & Theme
+          </ThemedText>
+          <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: Spacing.md }}>
+            Select your preferred interface color theme.
+          </ThemedText>
+
+          <View style={[styles.themeSelectorRow, { backgroundColor: theme.backgroundSecondary, borderColor: theme.border }]}>
+            {[
+              { key: "system" as const, label: "System", icon: "smartphone" },
+              { key: "light" as const, label: "Light", icon: "sun" },
+              { key: "dark" as const, label: "Dark", icon: "moon" },
+            ].map((option) => {
+              const isSelected = themeMode === option.key;
+              return (
+                <Pressable
+                  key={option.key}
+                  onPress={() => setThemeMode(option.key)}
+                  style={[
+                    styles.themeOptionBtn,
+                    isSelected && [
+                      styles.themeOptionBtnActive,
+                      { backgroundColor: theme.primary },
+                    ],
+                  ]}
+                >
+                  <Feather
+                    name={option.icon as any}
+                    size={14}
+                    color={isSelected ? "#FFFFFF" : theme.textSecondary}
+                    style={{ marginRight: 5 }}
+                  />
+                  <ThemedText
+                    type="small"
+                    style={{
+                      color: isSelected ? "#FFFFFF" : theme.text,
+                      fontWeight: isSelected ? "700" : "500",
+                    }}
+                  >
+                    {option.label}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
         {/* Role Explanations */}
         <View
           style={[
@@ -701,6 +743,28 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: Spacing.md,
+  },
+  themeSelectorRow: {
+    flexDirection: "row",
+    borderRadius: BorderRadius.lg,
+    padding: 4,
+    borderWidth: 1,
+    gap: 4,
+  },
+  themeOptionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+  },
+  themeOptionBtnActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   signOutButton: {
     flexDirection: "row",

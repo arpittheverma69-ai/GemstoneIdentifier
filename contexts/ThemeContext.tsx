@@ -1,9 +1,11 @@
-import React, { createContext, useContext, ReactNode } from 'react';
-import { useColorScheme } from 'react-native';
+import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useColorScheme as useSystemColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/theme';
 
-// Safe fallback theme - ALWAYS available
-const SAFE_THEME = {
+export type ThemeMode = 'system' | 'light' | 'dark';
+
+export const SAFE_THEME_LIGHT = {
   text: "#0F172A",
   textSecondary: "#64748B",
   buttonText: "#FFFFFF",
@@ -31,32 +33,68 @@ const SAFE_THEME = {
   gradientEnd: "#EC4899",
 };
 
-// Get safe theme from Colors or use fallback
-function getSafeTheme(isDark: boolean) {
-  try {
-    if (Colors && Colors[isDark ? 'dark' : 'light']) {
-      return { ...SAFE_THEME, ...Colors[isDark ? 'dark' : 'light'] };
-    }
-    if (Colors && Colors.light) {
-      return { ...SAFE_THEME, ...Colors.light };
-    }
-  } catch {
-    // Fall through to SAFE_THEME
-  }
-  return SAFE_THEME;
-}
-
-// GUARANTEED valid default value
-const DEFAULT_THEME_VALUE = {
-  theme: SAFE_THEME,
-  isDark: false,
+export const SAFE_THEME_DARK = {
+  text: "#FFFFFF",
+  textSecondary: "#94A3B8",
+  buttonText: "#FFFFFF",
+  tabIconDefault: "#64748B",
+  tabIconSelected: "#A78BFA",
+  link: "#A78BFA",
+  backgroundRoot: "#0F172A",
+  backgroundDefault: "#1E293B",
+  backgroundSecondary: "#334155",
+  backgroundTertiary: "#475569",
+  primary: "#A78BFA",
+  primaryLight: "#C4B5FD",
+  primaryDark: "#8B5CF6",
+  secondary: "#FBBF24",
+  secondaryLight: "#FCD34D",
+  success: "#34D399",
+  successLight: "#6EE7B7",
+  warning: "#FBBF24",
+  warningLight: "#FCD34D",
+  danger: "#F87171",
+  dangerLight: "#FCA5A5",
+  border: "#334155",
+  inputBackground: "#1E293B",
+  gradientStart: "#A78BFA",
+  gradientEnd: "#F472B6",
 };
 
-const ThemeContext = createContext(DEFAULT_THEME_VALUE);
+export function getSafeTheme(isDark: boolean) {
+  const safeBase = isDark ? SAFE_THEME_DARK : SAFE_THEME_LIGHT;
+  try {
+    if (Colors && Colors[isDark ? 'dark' : 'light']) {
+      return { ...safeBase, ...Colors[isDark ? 'dark' : 'light'] };
+    }
+  } catch {
+    // Fall through
+  }
+  return safeBase;
+}
+
+export interface ThemeContextType {
+  theme: typeof SAFE_THEME_LIGHT;
+  isDark: boolean;
+  themeMode: ThemeMode;
+  setThemeMode: (mode: ThemeMode) => Promise<void>;
+  toggleTheme: () => Promise<void>;
+}
+
+const DEFAULT_THEME_VALUE: ThemeContextType = {
+  theme: SAFE_THEME_LIGHT,
+  isDark: false,
+  themeMode: 'system',
+  setThemeMode: async () => {},
+  toggleTheme: async () => {},
+};
+
+export const ThemeContext = createContext<ThemeContextType>(DEFAULT_THEME_VALUE);
+
+const THEME_STORAGE_KEY = '@app_theme_mode';
 
 export const useAppTheme = () => {
   const context = useContext(ThemeContext);
-  // Safety check - ensure context has theme property
   if (!context || !context.theme || typeof context.theme !== 'object') {
     return DEFAULT_THEME_VALUE;
   }
@@ -64,24 +102,47 @@ export const useAppTheme = () => {
 };
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const theme = getSafeTheme(isDark);
+  const systemScheme = useSystemColorScheme();
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  // GUARANTEED to provide valid value
-  const value = {
-    theme: { ...SAFE_THEME, ...theme },
-    isDark: isDark || false,
+  useEffect(() => {
+    AsyncStorage.getItem(THEME_STORAGE_KEY)
+      .then((stored) => {
+        if (stored === 'light' || stored === 'dark' || stored === 'system') {
+          setThemeModeState(stored as ThemeMode);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIsLoaded(true));
+  }, []);
+
+  const setThemeMode = async (mode: ThemeMode) => {
+    setThemeModeState(mode);
+    try {
+      await AsyncStorage.setItem(THEME_STORAGE_KEY, mode);
+    } catch (e) {
+      console.error('Failed to save theme preference', e);
+    }
   };
 
-  // Final safety check
-  if (!value.theme || typeof value.theme !== 'object') {
-    return (
-      <ThemeContext.Provider value={DEFAULT_THEME_VALUE}>
-        {children}
-      </ThemeContext.Provider>
-    );
-  }
+  const isDark =
+    themeMode === 'system' ? systemScheme === 'dark' : themeMode === 'dark';
+
+  const theme = getSafeTheme(isDark);
+
+  const toggleTheme = async () => {
+    const nextMode: ThemeMode = isDark ? 'light' : 'dark';
+    await setThemeMode(nextMode);
+  };
+
+  const value: ThemeContextType = {
+    theme,
+    isDark,
+    themeMode,
+    setThemeMode,
+    toggleTheme,
+  };
 
   return (
     <ThemeContext.Provider value={value}>

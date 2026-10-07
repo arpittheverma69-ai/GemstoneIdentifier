@@ -1,7 +1,7 @@
 import { Text, type TextProps } from "react-native";
 
 import { useTheme } from "@/hooks/useTheme";
-import { Typography, Fonts } from "@/constants/theme";
+import { Typography, Fonts, Colors } from "@/constants/theme";
 
 export type ThemedTextProps = TextProps & {
   lightColor?: string;
@@ -26,23 +26,8 @@ export function ThemedText({
   ...rest
 }: ThemedTextProps) {
   const themeResult = useTheme();
-  // Safety check - ensure theme exists
-  const theme = themeResult?.theme || {
-    text: "#0F172A",
-    textSecondary: "#64748B",
-    link: "#8B5CF6",
-    primary: "#8B5CF6",
-    secondary: "#F59E0B",
-    success: "#10B981",
-    warning: "#F59E0B",
-    danger: "#EF4444",
-    backgroundRoot: "#F8FAFC",
-    backgroundDefault: "#FFFFFF",
-    backgroundSecondary: "#F1F5F9",
-    border: "#E2E8F0",
-    inputBackground: "#FFFFFF",
-  };
   const isDark = themeResult?.isDark || false;
+  const theme = themeResult?.theme || (isDark ? Colors?.dark : Colors?.light);
 
   const getColor = () => {
     if (isDark && darkColor) {
@@ -54,10 +39,10 @@ export function ThemedText({
     }
 
     if (type === "link") {
-      return theme?.link || "#8B5CF6";
+      return theme?.link || (isDark ? "#A78BFA" : "#8B5CF6");
     }
 
-    return theme?.text || "#0F172A";
+    return isDark ? (theme?.text || "#FFFFFF") : (theme?.text || "#0F172A");
   };
 
   const getTypeStyle = () => {

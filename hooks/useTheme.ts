@@ -1,85 +1,34 @@
-import { Colors } from "@/constants/theme";
+import { useContext } from "react";
+import { ThemeContext, SAFE_THEME_LIGHT, SAFE_THEME_DARK, getSafeTheme } from "@/contexts/ThemeContext";
 import { useColorScheme } from "@/hooks/useColorScheme";
+import { Colors } from "@/constants/theme";
 
-// Complete fallback theme - ALWAYS available, never changes
-const SAFE_THEME = {
-  text: "#0F172A",
-  textSecondary: "#64748B",
-  buttonText: "#FFFFFF",
-  tabIconDefault: "#94A3B8",
-  tabIconSelected: "#8B5CF6",
-  link: "#8B5CF6",
-  backgroundRoot: "#F8FAFC",
-  backgroundDefault: "#FFFFFF",
-  backgroundSecondary: "#F1F5F9",
-  backgroundTertiary: "#E2E8F0",
-  primary: "#8B5CF6",
-  primaryLight: "#A78BFA",
-  primaryDark: "#7C3AED",
-  secondary: "#F59E0B",
-  secondaryLight: "#FBBF24",
-  success: "#10B981",
-  successLight: "#34D399",
-  warning: "#F59E0B",
-  warningLight: "#FBBF24",
-  danger: "#EF4444",
-  dangerLight: "#F87171",
-  border: "#E2E8F0",
-  inputBackground: "#FFFFFF",
-  gradientStart: "#8B5CF6",
-  gradientEnd: "#EC4899",
-};
-
-// GUARANTEED return value - always available
-const ALWAYS_VALID_RESULT = {
-  theme: SAFE_THEME,
-  isDark: false,
-};
-
-// This function CANNOT fail - it always returns a valid object
 export function useTheme() {
-  // Hooks MUST be called unconditionally - no try-catch around hooks!
+  const context = useContext(ThemeContext);
   const colorScheme = useColorScheme();
-  
-  // Get color scheme - default to light if null/undefined
-  const scheme: "light" | "dark" = colorScheme === "dark" ? "dark" : "light";
+
+  // If inside ThemeProvider with valid theme, use context
+  if (context && context.theme && typeof context.theme === "object" && typeof context.isDark === "boolean") {
+    return {
+      theme: context.theme,
+      isDark: context.isDark,
+      themeMode: context.themeMode,
+      setThemeMode: context.setThemeMode,
+      toggleTheme: context.toggleTheme,
+    };
+  }
+
+  // Fallback for standalone usage
   const isDark = colorScheme === "dark";
+  const theme = getSafeTheme(isDark);
 
-  // Get theme from Colors - if anything fails, use SAFE_THEME
-  let theme = SAFE_THEME;
-  
-  try {
-    if (Colors && typeof Colors === "object" && !Array.isArray(Colors)) {
-      const colorTheme = Colors[scheme];
-      if (colorTheme && typeof colorTheme === "object" && !Array.isArray(colorTheme)) {
-        theme = { ...SAFE_THEME, ...colorTheme };
-      }
-    }
-  } catch {
-    // Use safe theme if anything fails
-    theme = SAFE_THEME;
-  }
-
-  // GUARANTEED return - merge to ensure all properties exist
-  const finalTheme = { ...SAFE_THEME, ...theme };
-  
-  // Create result object
-  const result = {
-    theme: finalTheme,
-    isDark: isDark,
+  return {
+    theme,
+    isDark,
+    themeMode: isDark ? "dark" : "light",
+    setThemeMode: async () => {},
+    toggleTheme: async () => {},
   };
-
-  // Final validation - return ALWAYS_VALID_RESULT if anything is wrong
-  if (!result || typeof result !== "object" || !result.theme || typeof result.theme !== "object") {
-    return ALWAYS_VALID_RESULT;
-  }
-
-  // Ensure theme property exists
-  if (!("theme" in result)) {
-    return ALWAYS_VALID_RESULT;
-  }
-
-  return result;
 }
 
 export default useTheme;
