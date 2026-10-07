@@ -3390,9 +3390,9 @@ export default function GemDatabaseScreen() {
                             {selectedGem.variety}
                           </Text>
                           {selectedGem.indianName ? (
-                            <View style={[styles.indianNameBadge, { backgroundColor: 'rgba(99, 102, 241, 0.15)', borderColor: 'rgba(99, 102, 241, 0.3)' }]}>
-                              <Feather name="bookmark" size={12} color="#818CF8" />
-                              <Text style={styles.indianNameText}>
+                            <View style={[styles.indianNameBadge, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)', borderColor: isDark ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.25)' }]}>
+                              <Feather name="bookmark" size={12} color={isDark ? "#818CF8" : theme.primary} />
+                              <Text style={[styles.indianNameText, { color: isDark ? '#818CF8' : theme.primary }]}>
                                 {selectedGem.indianName}
                               </Text>
                             </View>
@@ -3400,7 +3400,7 @@ export default function GemDatabaseScreen() {
                         </View>
 
                         {/* Subtitle with Species and Formula */}
-                        <Text style={styles.heroSubtitle}>
+                        <Text style={[styles.heroSubtitle, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>
                           {((selectedGem as any).Species || (selectedGem.variety === "Alexandrite" ? "Chrysoberyl" : "")) + " Species"}
                           {(selectedGem.chemicalComposition || (selectedGem as any)["Chemical Formula"]) ? ` • ${selectedGem.chemicalComposition || (selectedGem as any)["Chemical Formula"]}` : ""}
                         </Text>
@@ -3413,7 +3413,7 @@ export default function GemDatabaseScreen() {
                               <Feather name="layers" size={12} color="#818CF8" />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.heroAttrLabel}>SPECIES</Text>
+                              <Text style={[styles.heroAttrLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>SPECIES</Text>
                               <Text numberOfLines={1} style={[styles.heroAttrVal, { color: isDark ? '#FFFFFF' : theme.text }]}>
                                 {(selectedGem as any).Species || (selectedGem.variety === "Alexandrite" ? "Chrysoberyl" : "Gemstone")}
                               </Text>
@@ -3426,7 +3426,7 @@ export default function GemDatabaseScreen() {
                               <Feather name="disc" size={12} color="#34D399" />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.heroAttrLabel}>CRYSTAL</Text>
+                              <Text style={[styles.heroAttrLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>CRYSTAL</Text>
                               <Text numberOfLines={1} style={[styles.heroAttrVal, { color: isDark ? '#FFFFFF' : theme.text }]}>
                                 {(selectedGem as any)["Crystal System"] || selectedGem.crystalSystem || "Orthorhombic"}
                               </Text>
@@ -3439,7 +3439,7 @@ export default function GemDatabaseScreen() {
                               <Feather name="eye" size={12} color="#FBBF24" />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.heroAttrLabel}>OPTICS</Text>
+                              <Text style={[styles.heroAttrLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>OPTICS</Text>
                               <Text numberOfLines={1} style={[styles.heroAttrVal, { color: isDark ? '#FFFFFF' : theme.text }]}>
                                 {selectedGem.opticCharacter?.includes("DR") ? "DR (Biaxial)" : (selectedGem.opticCharacter || "Biaxial")}
                               </Text>
@@ -3466,7 +3466,7 @@ export default function GemDatabaseScreen() {
                         <View style={[styles.propertyIconBadgeCircle, { backgroundColor: '#6366F1' }]}>
                           <Feather name="eye" size={14} color="#FFFFFF" />
                         </View>
-                        <ThemedText type="caption" style={styles.propertyMetricLabel}>
+                        <ThemedText type="caption" style={[styles.propertyMetricLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>
                           Refractive Index (RI)
                         </ThemedText>
                         <ThemedText type="h4" style={[styles.propertyMetricValue, { color: isDark ? '#A5B4FC' : '#4F46E5' }]}>
@@ -3479,7 +3479,7 @@ export default function GemDatabaseScreen() {
                         <View style={[styles.propertyIconBadgeCircle, { backgroundColor: '#10B981' }]}>
                           <Feather name="activity" size={14} color="#FFFFFF" />
                         </View>
-                        <ThemedText type="caption" style={styles.propertyMetricLabel}>
+                        <ThemedText type="caption" style={[styles.propertyMetricLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>
                           Specific Gravity (SG)
                         </ThemedText>
                         <ThemedText type="h4" style={[styles.propertyMetricValue, { color: isDark ? '#6EE7B7' : '#059669' }]}>
@@ -3492,7 +3492,7 @@ export default function GemDatabaseScreen() {
                         <View style={[styles.propertyIconBadgeCircle, { backgroundColor: '#F59E0B' }]}>
                           <Feather name="shield" size={14} color="#FFFFFF" />
                         </View>
-                        <ThemedText type="caption" style={styles.propertyMetricLabel}>
+                        <ThemedText type="caption" style={[styles.propertyMetricLabel, { color: isDark ? '#94A3B8' : theme.textSecondary }]}>
                           Hardness
                         </ThemedText>
                         <ThemedText type="h4" style={[styles.propertyMetricValue, { color: isDark ? '#FCD34D' : '#D97706' }]}>
@@ -4885,6 +4885,8 @@ function DataRow({
   mono?: boolean;
   valueColor?: string;
 }) {
+  const { theme, isDark } = getThemeSafe();
+
   if (!value || value === "undefined" || value === "null" || (value === "NA" && label === "Title")) return null;
 
   let stringVal = String(value).trim();
@@ -4895,15 +4897,15 @@ function DataRow({
     stringVal = stringVal.replace(/\s*(LWUV:)/i, "\n$1");
   }
 
-  // Pure bright white unconditionally as requested
-  const textColor = valueColor || "#FFFFFF";
+  const textColor = valueColor || (isDark ? "#FFFFFF" : theme.text);
+  const labelColor = isDark ? "#94A3B8" : theme.textSecondary;
 
   return (
-    <View style={styles.dataRow}>
+    <View style={[styles.dataRow, { borderBottomColor: isDark ? "rgba(148, 163, 184, 0.1)" : theme.border }]}>
       <Text
         style={{
           flex: 1,
-          color: "#94A3B8",
+          color: labelColor,
           fontWeight: '600',
           fontSize: 13.5,
           paddingTop: 1,
