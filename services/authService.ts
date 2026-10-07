@@ -425,6 +425,52 @@ export async function resetPassword(
   }
 }
 
+// Verify OTP code and reset password (for logged-out users)
+export async function verifyRecoveryOtpAndSetPassword(
+  email: string,
+  token: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: "Database client not initialized" };
+  }
+
+  if (!email || !email.trim()) {
+    return { success: false, error: "Email address is required" };
+  }
+  if (!token || !token.trim()) {
+    return { success: false, error: "Reset / verification code is required" };
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return { success: false, error: "New password must be at least 6 characters long" };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: token.trim(),
+      type: "recovery",
+    });
+
+    if (error) {
+      return { success: false, error: error.message || "Invalid or expired reset code" };
+    }
+
+    // After OTP verification, user session is in recovery mode, update password
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword.trim(),
+    });
+
+    if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Failed to reset password" };
+  }
+}
+
 // Update password for currently authenticated user
 export async function updatePassword(
   newPassword: string
